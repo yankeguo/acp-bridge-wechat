@@ -50,7 +50,8 @@ Options:
                       Use 0 to disable idle cleanup
   --max-sessions <n>  Max concurrent user sessions (default: 10)
   --hide-thoughts     Do not forward agent thinking to WeChat (default: forwarded)
-  -v, --verbose       Verbose logging
+  --bot-agent <ua>    bot_agent for WeChat API (UA-style, e.g. "MyBot/1.0")
+  -v, --verbose       Verbose logging (includes WeChat protocol debug)
   -h, --help          Show this help
 `);
 }
@@ -65,6 +66,7 @@ function parseArgs(argv: string[]): {
   idleTimeout?: number;
   maxSessions?: number;
   hideThoughts: boolean;
+  botAgent?: string;
   verbose: boolean;
   help: boolean;
 } {
@@ -110,6 +112,9 @@ function parseArgs(argv: string[]): {
         break;
       case "--hide-thoughts":
         result.hideThoughts = true;
+        break;
+      case "--bot-agent":
+        result.botAgent = args[++i];
         break;
       case "-v":
       case "--verbose":
@@ -230,12 +235,17 @@ async function main(): Promise<void> {
   }
   if (args.maxSessions) config.session.maxConcurrentUsers = args.maxSessions;
   if (args.hideThoughts) config.agent.showThoughts = false;
+  if (args.botAgent) config.wechat.botAgent = args.botAgent;
 
   // Create and start bridge
-  const bridge = new WeChatAcpBridge(config, (msg) => {
-    const ts = new Date().toISOString().substring(11, 19);
-    console.log(`[${ts}] ${msg}`);
-  });
+  const bridge = new WeChatAcpBridge(
+    config,
+    (msg) => {
+      const ts = new Date().toISOString().substring(11, 19);
+      console.log(`[${ts}] ${msg}`);
+    },
+    { verbose: args.verbose },
+  );
 
   // Handle graceful shutdown
   const shutdown = async (reason: "signal" | "error" | "normal") => {
