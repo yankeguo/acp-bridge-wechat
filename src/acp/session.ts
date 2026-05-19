@@ -9,7 +9,6 @@ import type { ChildProcess } from "node:child_process";
 import type * as acp from "@agentclientprotocol/sdk";
 import { WeChatAcpClient } from "./client.js";
 import { spawnAgent, killAgent, type AgentProcessInfo } from "./agent-manager.js";
-import { trackEvent, trackException, hashUserId } from "../telemetry/index.js";
 
 export interface PendingMessage {
   prompt: acp.ContentBlock[];
@@ -32,7 +31,6 @@ export interface SessionManagerOpts {
   agentArgs: string[];
   agentCwd: string;
   agentEnv?: Record<string, string>;
-  agentPreset?: string;
   idleTimeoutMs: number;
   maxConcurrentUsers: number;
   showThoughts: boolean;
@@ -125,12 +123,6 @@ export class SessionManager {
       log: (msg) => this.opts.log(`[${userId}] ${msg}`),
     });
 
-    trackEvent("session.created", {
-      userIdHash: hashUserId(userId),
-      agentPreset: this.opts.agentPreset ?? "raw",
-      activeSessions: this.sessions.size + 1,
-    });
-
     // If agent process exits, clean up the session
     agentInfo.process.on("exit", () => {
       const s = this.sessions.get(userId);
@@ -166,7 +158,6 @@ export class SessionManager {
         // Reset chunks for the new turn
         await session.client.flush();
 
-        const promptStartedAt = Date.now();
         try {
           // Send typing immediately so user knows the prompt was received
           this.opts.sendTyping(session.userId, pending.contextToken).catch(() => {});
@@ -189,31 +180,12 @@ export class SessionManager {
 
           this.opts.log(`[${session.userId}] Agent done (${result.stopReason}), reply ${replyText.length} chars`);
 
-          trackEvent("prompt.completed", {
-            userIdHash: hashUserId(session.userId),
-            agentPreset: this.opts.agentPreset ?? "raw",
-            stopReason: String(result.stopReason),
-            success: true,
-            durationMs: Date.now() - promptStartedAt,
-            replyChars: replyText.length,
-          });
-
           // Send reply back to WeChat
           if (replyText.trim()) {
             await this.opts.onReply(session.userId, pending.contextToken, replyText);
           }
         } catch (err) {
           this.opts.log(`[${session.userId}] Agent prompt error: ${String(err)}`);
-
-          trackException(err, "prompt");
-          trackEvent("prompt.completed", {
-            userIdHash: hashUserId(session.userId),
-            agentPreset: this.opts.agentPreset ?? "raw",
-            stopReason: "error",
-            success: false,
-            durationMs: Date.now() - promptStartedAt,
-            replyChars: 0,
-          });
 
           // Check if agent died
           if (session.agentInfo.process.killed || session.agentInfo.process.exitCode !== null) {

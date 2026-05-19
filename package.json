@@ -27,7 +27,6 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.16.1",
-    "applicationinsights": "^3.0.0",
     "qrcode-terminal": "^0.12.0"
   },
   "devDependencies": {
