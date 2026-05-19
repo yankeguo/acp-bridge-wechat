@@ -3,8 +3,8 @@
  */
 
 import crypto from "node:crypto";
-import { sendMessage } from "./api.js";
-import { MessageType, MessageState } from "./types.js";
+import { sendMessage } from "./api/api.js";
+import { MessageType, MessageState } from "./api/types.js";
 
 export interface WeixinSendOpts {
   baseUrl: string;

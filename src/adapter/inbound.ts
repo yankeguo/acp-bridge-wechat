@@ -3,49 +3,23 @@
  */
 
 import fs from "node:fs";
+import path from "node:path";
 import type * as acp from "@agentclientprotocol/sdk";
-import type { WeixinMessage, MessageItem } from "../weixin/types.js";
-import { MessageItemType } from "../weixin/types.js";
-import { parseAesKey, downloadAndDecrypt } from "../weixin/media.js";
+import type { WeixinMessage } from "../weixin/api/types.js";
+import { MessageItemType } from "../weixin/api/types.js";
+import { downloadMediaFromItem } from "../weixin/media/media-download.js";
+import { createSaveMediaFn } from "../weixin/media/save-media.js";
+import { getMimeFromFilename } from "../weixin/media/mime.js";
+import {
+  bodyFromItemList,
+  findInboundMediaItem,
+  type WeixinInboundMediaOpts,
+} from "../weixin/messaging/inbound.js";
 
-/**
- * Extract text body from a WeChat message's item_list.
- */
-function extractText(itemList?: MessageItem[]): string {
-  if (!itemList?.length) return "";
-  for (const item of itemList) {
-    if (item.type === MessageItemType.TEXT && item.text_item?.text != null) {
-      const text = String(item.text_item.text);
-      const ref = item.ref_msg;
-      if (!ref) return text;
-      // Build quoted context
-      const parts: string[] = [];
-      if (ref.title) parts.push(ref.title);
-      if (ref.message_item?.text_item?.text) parts.push(ref.message_item.text_item.text);
-      if (!parts.length) return text;
-      return `[引用: ${parts.join(" | ")}]\n${text}`;
-    }
-    // Voice transcription
-    if (item.type === MessageItemType.VOICE && item.voice_item?.text) {
-      return item.voice_item.text;
-    }
-  }
-  return "";
-}
-
-/**
- * Find the first media item in a message.
- */
-function findMediaItem(itemList?: MessageItem[]): MessageItem | undefined {
-  if (!itemList) return undefined;
-  return (
-    itemList.find((i) => i.type === MessageItemType.IMAGE && i.image_item?.media?.encrypt_query_param) ??
-    itemList.find((i) => i.type === MessageItemType.VIDEO && i.video_item?.media?.encrypt_query_param) ??
-    itemList.find((i) => i.type === MessageItemType.FILE && i.file_item?.media?.encrypt_query_param) ??
-    itemList.find(
-      (i) => i.type === MessageItemType.VOICE && i.voice_item?.media?.encrypt_query_param && !i.voice_item.text,
-    )
-  );
+export interface InboundConvertOpts {
+  cdnBaseUrl: string;
+  mediaDir: string;
+  log: (msg: string) => void;
 }
 
 /**
@@ -53,36 +27,38 @@ function findMediaItem(itemList?: MessageItem[]): MessageItem | undefined {
  */
 export async function weixinMessageToPrompt(
   msg: WeixinMessage,
-  cdnBaseUrl: string,
-  log: (msg: string) => void,
+  opts: InboundConvertOpts,
 ): Promise<acp.ContentBlock[]> {
   const blocks: acp.ContentBlock[] = [];
+  const { cdnBaseUrl, mediaDir, log } = opts;
 
-  // Extract text
-  const text = extractText(msg.item_list);
+  const text = bodyFromItemList(msg.item_list);
   if (text) {
     blocks.push({ type: "text", text });
   }
 
-  // Try to download and attach media
-  const mediaItem = findMediaItem(msg.item_list);
+  const mediaItem = findInboundMediaItem(msg);
   if (mediaItem) {
     try {
-      const attached = await convertMediaItem(mediaItem, cdnBaseUrl, log);
+      const saveMedia = createSaveMediaFn(mediaDir);
+      const downloaded: WeixinInboundMediaOpts = await downloadMediaFromItem(mediaItem, {
+        cdnBaseUrl,
+        saveMedia,
+        log,
+        errLog: log,
+        label: "inbound",
+      });
+      const attached = await mediaOptsToContentBlock(downloaded, log);
       if (attached) blocks.push(attached);
     } catch (err) {
       log(`Media download failed, skipping: ${String(err)}`);
-      // Add a text note about the media
-      const mediaType = mediaItem.type === MessageItemType.IMAGE ? "image"
-        : mediaItem.type === MessageItemType.VIDEO ? "video"
-        : mediaItem.type === MessageItemType.FILE ? `file (${mediaItem.file_item?.file_name ?? "unknown"})`
-        : mediaItem.type === MessageItemType.VOICE ? "voice"
-        : "media";
-      blocks.push({ type: "text", text: `[Received ${mediaType} - download failed]` });
+      blocks.push({
+        type: "text",
+        text: `[Received media - download failed: ${String(err)}]`,
+      });
     }
   }
 
-  // Fallback: always have at least one content block
   if (blocks.length === 0) {
     blocks.push({ type: "text", text: "[empty message]" });
   }
@@ -90,60 +66,54 @@ export async function weixinMessageToPrompt(
   return blocks;
 }
 
-async function convertMediaItem(
-  item: MessageItem,
-  cdnBaseUrl: string,
+async function mediaOptsToContentBlock(
+  media: WeixinInboundMediaOpts,
   log: (msg: string) => void,
 ): Promise<acp.ContentBlock | null> {
-  if (item.type === MessageItemType.IMAGE && item.image_item?.media) {
-    const media = item.image_item.media;
-    const aesKey = parseAesKey(media);
-    if (!aesKey || !media.encrypt_query_param) return null;
-
-    log("Downloading image from CDN...");
-    const buffer = await downloadAndDecrypt(media.encrypt_query_param, aesKey, cdnBaseUrl);
-    const base64 = buffer.toString("base64");
-
+  if (media.decryptedPicPath) {
+    log(`Downloaded image: ${media.decryptedPicPath}`);
+    const buffer = await fs.promises.readFile(media.decryptedPicPath);
     return {
       type: "image",
-      data: base64,
+      data: buffer.toString("base64"),
       mimeType: "image/jpeg",
     } as acp.ContentBlock;
   }
 
-  if (item.type === MessageItemType.FILE && item.file_item?.media) {
-    const media = item.file_item.media;
-    const aesKey = parseAesKey(media);
-    if (!aesKey || !media.encrypt_query_param) return null;
-
-    log(`Downloading file "${item.file_item.file_name}" from CDN...`);
-    const buffer = await downloadAndDecrypt(media.encrypt_query_param, aesKey, cdnBaseUrl);
-
-    // For text-like files, send as resource; for binary, describe it
-    const fileName = item.file_item.file_name ?? "file";
+  if (media.decryptedFilePath) {
+    const fileName = path.basename(media.decryptedFilePath);
+    log(`Downloaded file: ${fileName}`);
+    const buffer = await fs.promises.readFile(media.decryptedFilePath);
     if (isTextFile(fileName)) {
-      const content = buffer.toString("utf-8");
       return {
         type: "resource",
         resource: {
           uri: `file:///${fileName}`,
-          mimeType: guessMimeType(fileName),
-          text: content,
+          mimeType: media.fileMediaType ?? getMimeFromFilename(fileName),
+          text: buffer.toString("utf-8"),
         },
       } as acp.ContentBlock;
     }
-
-    return { type: "text", text: `[Received file: ${fileName}, ${buffer.length} bytes]` };
+    return {
+      type: "text",
+      text: `[Received file: ${fileName}, ${buffer.length} bytes]`,
+    };
   }
 
-  if (item.type === MessageItemType.VOICE && item.voice_item?.media) {
-    // If there's a transcription, it was already handled in extractText
-    // Otherwise, note we received voice
-    return { type: "text", text: "[Received voice message - no transcription available]" };
+  if (media.decryptedVoicePath) {
+    log(`Downloaded voice: ${media.decryptedVoicePath} (${media.voiceMediaType ?? "audio"})`);
+    return {
+      type: "text",
+      text: `[Received voice message at ${media.decryptedVoicePath}]`,
+    };
   }
 
-  if (item.type === MessageItemType.VIDEO) {
-    return { type: "text", text: "[Received video message]" };
+  if (media.decryptedVideoPath) {
+    log(`Downloaded video: ${media.decryptedVideoPath}`);
+    return {
+      type: "text",
+      text: `[Received video: ${path.basename(media.decryptedVideoPath)}]`,
+    };
   }
 
   return null;
@@ -156,15 +126,4 @@ function isTextFile(name: string): boolean {
     "css", "html", "xml", "yaml", "yml", "toml", "ini", "cfg", "sh",
     "bash", "rs", "go", "rb", "php", "sql", "csv", "log", "env",
   ].includes(ext);
-}
-
-function guessMimeType(name: string): string {
-  const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  const map: Record<string, string> = {
-    txt: "text/plain", md: "text/markdown", json: "application/json",
-    js: "text/javascript", ts: "text/typescript", py: "text/x-python",
-    html: "text/html", css: "text/css", xml: "text/xml",
-    yaml: "text/yaml", yml: "text/yaml", csv: "text/csv",
-  };
-  return map[ext] ?? "text/plain";
 }

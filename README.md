@@ -82,6 +82,8 @@ Options:
 - `--idle-timeout <minutes>`: session idle timeout, default `1440` (use `0` for unlimited)
 - `--max-sessions <count>`: maximum concurrent user sessions, default `10`
 - `--hide-thoughts`: do not forward agent thinking to WeChat (default: forwarded)
+- `--bot-agent <ua>`: `bot_agent` identity sent with each WeChat API request (UA-style, e.g. `MyBot/1.0`)
+- `-v, --verbose`: verbose logging (includes WeChat protocol layer)
 - `-h, --help`: show help
 
 Examples:
@@ -146,6 +148,15 @@ You can also override or add agent presets:
   }
 }
 ```
+
+## WeChat protocol layer
+
+The WeChat iLink client in `src/weixin/` is vendored from [@tencent-weixin/openclaw-weixin](https://www.npmjs.com/package/@tencent-weixin/openclaw-weixin) (protocol, login, CDN media, lifecycle). OpenClaw-specific integration is not included.
+
+Built-in WeChat slash commands (handled before the ACP agent):
+
+- `/echo <message>` — echo back with timing stats
+- `/toggle-debug` — toggle per-bot debug mode flag
 
 ## Runtime Behavior
 

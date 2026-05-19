@@ -5,12 +5,20 @@
  * One bridge = one WeChat bot account → many users → many agent sessions.
  */
 
-import { login, loadToken, type TokenData } from "./weixin/auth.js";
-import { startMonitor } from "./weixin/monitor.js";
+import path from "node:path";
+import { login, loadToken, type TokenData } from "./weixin/auth/login.js";
+import { startMonitor } from "./weixin/monitor/monitor.js";
 import { sendTextMessage, splitText } from "./weixin/send.js";
-import { sendTyping, getConfig } from "./weixin/api.js";
-import { TypingStatus, MessageType } from "./weixin/types.js";
-import type { WeixinMessage } from "./weixin/types.js";
+import { sendTyping, notifyStart, notifyStop } from "./weixin/api/api.js";
+import { TypingStatus, MessageType } from "./weixin/api/types.js";
+import type { WeixinMessage } from "./weixin/api/types.js";
+import { WeixinConfigManager } from "./weixin/api/config-cache.js";
+import { setWeixinRuntimeConfig } from "./weixin/api/runtime-config.js";
+import { initWeixinLogger } from "./weixin/util/logger.js";
+import { setDebugModeStorageDir } from "./weixin/messaging/debug-mode.js";
+import { handleSlashCommand } from "./weixin/messaging/slash-commands.js";
+import { extractTextBody } from "./weixin/messaging/inbound.js";
+import { restoreContextTokens, setContextToken } from "./weixin/storage/context-tokens.js";
 import { SessionManager } from "./acp/session.js";
 import { weixinMessageToPrompt } from "./adapter/inbound.js";
 import { formatForWeChat } from "./adapter/outbound.js";
@@ -23,13 +31,24 @@ export class WeChatAcpBridge {
   private abortController = new AbortController();
   private sessionManager: SessionManager | null = null;
   private tokenData: TokenData | null = null;
-  // Per-user typing ticket cache
-  private typingTickets = new Map<string, { ticket: string; expiresAt: number }>();
+  private configManager: WeixinConfigManager | null = null;
+  private typingTickets = new Map<string, string>();
   private log: (msg: string) => void;
+  private verbose: boolean;
 
-  constructor(config: WeChatAcpConfig, log?: (msg: string) => void) {
+  constructor(
+    config: WeChatAcpConfig,
+    log?: (msg: string) => void,
+    opts?: { verbose?: boolean },
+  ) {
     this.config = config;
+    this.verbose = Boolean(opts?.verbose);
     this.log = log ?? ((msg: string) => console.log(`[acp-bridge-wechat] ${msg}`));
+    initWeixinLogger({ log: this.log, verbose: this.verbose });
+    setWeixinRuntimeConfig({
+      botAgent: config.wechat.botAgent,
+      routeTag: config.wechat.routeTag,
+    });
   }
 
   async start(opts?: {
@@ -38,7 +57,9 @@ export class WeChatAcpBridge {
   }): Promise<void> {
     const { forceLogin, renderQrUrl } = opts ?? {};
 
-    // 1. Login or load token
+    restoreContextTokens(this.config.storage.dir);
+    setDebugModeStorageDir(this.config.storage.dir);
+
     if (!forceLogin) {
       this.tokenData = loadToken(this.config.storage.dir);
     }
@@ -50,13 +71,32 @@ export class WeChatAcpBridge {
         storageDir: this.config.storage.dir,
         log: this.log,
         renderQrUrl,
+        verbose: this.verbose,
       });
     } else {
-      this.log(`Loaded saved token (Bot: ${this.tokenData.accountId}, saved at ${this.tokenData.savedAt})`);
+      this.log(
+        `Loaded saved token (Bot: ${this.tokenData.accountId}, saved at ${this.tokenData.savedAt})`,
+      );
       this.log(`Use --login to force re-login`);
     }
 
-    // 2. Create SessionManager
+    try {
+      const startResp = await notifyStart({
+        baseUrl: this.tokenData.baseUrl,
+        token: this.tokenData.token,
+      });
+      if (startResp.ret !== undefined && startResp.ret !== 0) {
+        this.log(`notifyStart: ret=${startResp.ret} errmsg=${startResp.errmsg ?? ""}`);
+      }
+    } catch (err) {
+      this.log(`notifyStart failed (ignored): ${String(err)}`);
+    }
+
+    this.configManager = new WeixinConfigManager(
+      { baseUrl: this.tokenData.baseUrl, token: this.tokenData.token },
+      this.log,
+    );
+
     this.sessionManager = new SessionManager({
       agentCommand: this.config.agent.command,
       agentArgs: this.config.agent.args,
@@ -71,15 +111,15 @@ export class WeChatAcpBridge {
     });
     this.sessionManager.start();
 
-    // 3. Start monitor loop
     this.log("Starting message polling...");
     await startMonitor({
       baseUrl: this.tokenData.baseUrl,
       token: this.tokenData.token,
       storageDir: this.config.storage.dir,
+      accountId: this.tokenData.accountId,
       abortSignal: this.abortController.signal,
       log: this.log,
-      onMessage: (msg) => this.handleMessage(msg),
+      onMessage: (msg, typingTicket) => this.handleMessage(msg, typingTicket),
     });
   }
 
@@ -87,38 +127,79 @@ export class WeChatAcpBridge {
     this.log("Stopping bridge...");
     this.abortController.abort();
     await this.sessionManager?.stop();
+
+    if (this.tokenData?.token) {
+      try {
+        const resp = await notifyStop({
+          baseUrl: this.tokenData.baseUrl,
+          token: this.tokenData.token,
+        });
+        if (resp.ret !== undefined && resp.ret !== 0) {
+          this.log(`notifyStop: ret=${resp.ret} errmsg=${resp.errmsg ?? ""}`);
+        }
+      } catch (err) {
+        this.log(`notifyStop failed (ignored): ${String(err)}`);
+      }
+    }
+
     this.log("Bridge stopped");
   }
 
-  private handleMessage(msg: WeixinMessage): void {
-    // Only process user messages (not bot's own messages)
+  private handleMessage(msg: WeixinMessage, typingTicket: string): void {
     if (msg.message_type !== MessageType.USER) return;
-
-    // Skip group messages (v1: direct only)
     if (msg.group_id) return;
 
     const userId = msg.from_user_id;
     const contextToken = msg.context_token;
     if (!userId || !contextToken) return;
 
+    if (msg.context_token) {
+      setContextToken(this.config.storage.dir, userId, msg.context_token);
+    }
+    if (typingTicket) {
+      this.typingTickets.set(userId, typingTicket);
+    }
+
     this.log(`Message from ${userId}: ${this.previewMessage(msg)}`);
 
-    // Convert and enqueue — fire-and-forget (don't block the poll loop)
-    this.enqueueMessage(msg, userId, contextToken).catch((err) => {
-      this.log(`Failed to enqueue message from ${userId}: ${String(err)}`);
+    this.processMessage(msg, userId, contextToken).catch((err) => {
+      this.log(`Failed to process message from ${userId}: ${String(err)}`);
     });
   }
 
-  private async enqueueMessage(
+  private async processMessage(
     msg: WeixinMessage,
     userId: string,
     contextToken: string,
   ): Promise<void> {
-    const prompt = await weixinMessageToPrompt(
-      msg,
-      this.config.wechat.cdnBaseUrl,
-      this.log,
-    );
+    const textBody = extractTextBody(msg);
+    if (textBody.startsWith("/")) {
+      const slash = await handleSlashCommand(
+        textBody,
+        {
+          to: userId,
+          contextToken,
+          baseUrl: this.tokenData!.baseUrl,
+          token: this.tokenData!.token,
+          accountId: this.tokenData!.accountId,
+          log: this.log,
+          errLog: this.log,
+        },
+        Date.now(),
+        msg.create_time_ms,
+      );
+      if (slash.handled) {
+        this.log(`Slash command handled for ${userId}`);
+        return;
+      }
+    }
+
+    const mediaDir = path.join(this.config.storage.dir, "media");
+    const prompt = await weixinMessageToPrompt(msg, {
+      cdnBaseUrl: this.config.wechat.cdnBaseUrl,
+      mediaDir,
+      log: this.log,
+    });
 
     await this.sessionManager!.enqueue(userId, { prompt, contextToken });
   }
@@ -135,12 +216,11 @@ export class WeChatAcpBridge {
       });
     }
 
-    // Cancel typing indicator after reply is sent
     this.cancelTypingIndicator(userId, contextToken).catch(() => {});
   }
 
   private async cancelTypingIndicator(userId: string, contextToken: string): Promise<void> {
-    const ticket = await this.getTypingTicket(userId, contextToken);
+    const ticket = await this.resolveTypingTicket(userId, contextToken);
     if (!ticket) return;
 
     await sendTyping({
@@ -156,7 +236,7 @@ export class WeChatAcpBridge {
 
   private async sendTypingIndicator(userId: string, contextToken: string): Promise<void> {
     try {
-      const ticket = await this.getTypingTicket(userId, contextToken);
+      const ticket = await this.resolveTypingTicket(userId, contextToken);
       if (!ticket) return;
 
       await sendTyping({
@@ -169,31 +249,19 @@ export class WeChatAcpBridge {
         },
       });
     } catch {
-      // Typing is best-effort
+      // best-effort
     }
   }
 
-  private async getTypingTicket(userId: string, contextToken: string): Promise<string | null> {
+  private async resolveTypingTicket(userId: string, contextToken: string): Promise<string | null> {
     const cached = this.typingTickets.get(userId);
-    if (cached && cached.expiresAt > Date.now()) return cached.ticket;
+    if (cached) return cached;
 
-    try {
-      const resp = await getConfig({
-        baseUrl: this.tokenData!.baseUrl,
-        token: this.tokenData!.token,
-        ilinkUserId: userId,
-        contextToken,
-      });
-
-      if (resp.typing_ticket) {
-        this.typingTickets.set(userId, {
-          ticket: resp.typing_ticket,
-          expiresAt: Date.now() + 24 * 60 * 60_000, // 24h cache
-        });
-        return resp.typing_ticket;
-      }
-    } catch {
-      // Not critical
+    if (!this.configManager) return null;
+    const cfg = await this.configManager.getForUser(userId, contextToken);
+    if (cfg.typingTicket) {
+      this.typingTickets.set(userId, cfg.typingTicket);
+      return cfg.typingTicket;
     }
     return null;
   }
@@ -206,7 +274,11 @@ export class WeChatAcpBridge {
         return text.length > 50 ? text.substring(0, 50) + "..." : text;
       }
       if (item.type === 2) return "[image]";
-      if (item.type === 3) return item.voice_item?.text ? `[voice] ${item.voice_item.text.substring(0, 30)}` : "[voice]";
+      if (item.type === 3) {
+        return item.voice_item?.text
+          ? `[voice] ${item.voice_item.text.substring(0, 30)}`
+          : "[voice]";
+      }
       if (item.type === 4) return `[file] ${item.file_item?.file_name ?? ""}`;
       if (item.type === 5) return "[video]";
     }

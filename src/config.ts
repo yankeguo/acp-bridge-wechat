@@ -66,6 +66,10 @@ export interface WeChatAcpConfig {
     baseUrl: string;
     cdnBaseUrl: string;
     botType: string;
+    /** UA-style bot identity for base_info.bot_agent (optional). */
+    botAgent?: string;
+    /** Optional SKRouteTag request header. */
+    routeTag?: string;
   };
   agent: {
     preset?: string;
@@ -119,6 +123,8 @@ export function defaultConfig(opts?: { instance?: string }): WeChatAcpConfig {
       baseUrl: "https://ilinkai.weixin.qq.com",
       cdnBaseUrl: "https://novac2c.cdn.weixin.qq.com/c2c",
       botType: "3",
+      botAgent: undefined,
+      routeTag: undefined,
     },
     agent: {
       preset: undefined,
