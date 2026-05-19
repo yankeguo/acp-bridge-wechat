@@ -1,4 +1,6 @@
-# WeChat ACP
+# acp-bridge-wechat
+
+> **Hard fork notice:** This repository is a hard fork of [formulahendry/wechat-acp](https://github.com/formulahendry/wechat-acp)—a clean fork without commit history. We have decided to break away from upstream and evolve independently (**脱离上游，自主演进**).
 
 [![NPM Downloads](https://img.shields.io/npm/d18m/wechat-acp)](https://www.npmjs.com/package/wechat-acp)
 
