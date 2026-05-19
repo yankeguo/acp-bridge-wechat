@@ -9,6 +9,7 @@ import type { ChildProcess } from "node:child_process";
 import type * as acp from "@agentclientprotocol/sdk";
 import { WeChatAcpClient } from "./client.js";
 import { spawnAgent, killAgent, type AgentProcessInfo } from "./agent-manager.js";
+import { resolveAgentDirectory } from "./user-cwd.js";
 
 export interface PendingMessage {
   prompt: acp.ContentBlock[];
@@ -28,6 +29,10 @@ export interface UserSession {
   createdAt: number;
 }
 
+export type ChangeDirectoryResult =
+  | { ok: true; path: string; hadSession: boolean }
+  | { ok: false; error: string };
+
 export interface SessionManagerOpts {
   agentCommand: string;
   agentArgs: string[];
@@ -43,12 +48,18 @@ export interface SessionManagerOpts {
 
 export class SessionManager {
   private sessions = new Map<string, UserSession>();
+  /** In-memory only; cleared when the bridge process restarts. */
+  private userCwdOverrides = new Map<string, string>();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private opts: SessionManagerOpts;
   private aborted = false;
 
   constructor(opts: SessionManagerOpts) {
     this.opts = opts;
+  }
+
+  getAgentCwd(userId: string): string {
+    return this.userCwdOverrides.get(userId) ?? this.opts.agentCwd;
   }
 
   start(): void {
@@ -136,8 +147,49 @@ export class SessionManager {
     return "stopped";
   }
 
+  /**
+   * Set this user's agent working directory and tear down any existing ACP subprocess.
+   * The next inbound message spawns a fresh agent in the new cwd.
+   */
+  async changeWorkingDirectory(userId: string, rawPath: string): Promise<ChangeDirectoryResult> {
+    const resolved = resolveAgentDirectory(rawPath, this.opts.agentCwd);
+    if (!resolved.ok) {
+      return { ok: false, error: resolved.error };
+    }
+
+    const hadSession = this.sessions.has(userId);
+    const session = this.sessions.get(userId);
+
+    if (session) {
+      session.queue.length = 0;
+      session.suppressOutbound = true;
+      session.lastActivity = Date.now();
+
+      if (session.processing) {
+        try {
+          await session.agentInfo.connection.cancel({
+            sessionId: session.agentInfo.sessionId,
+          });
+          this.opts.log(`[${userId}] session/cancel before //cd`);
+        } catch (err) {
+          this.opts.log(`[${userId}] session/cancel before //cd failed: ${String(err)}`);
+        }
+      }
+
+      killAgent(session.agentInfo.process);
+      this.sessions.delete(userId);
+      this.opts.log(`[${userId}] Agent stopped for directory change`);
+    }
+
+    this.userCwdOverrides.set(userId, resolved.path);
+
+    this.opts.log(`[${userId}] Agent cwd set to ${resolved.path}`);
+    return { ok: true, path: resolved.path, hadSession };
+  }
+
   private async createSession(userId: string, contextToken: string): Promise<UserSession> {
-    this.opts.log(`Creating new session for ${userId}`);
+    const cwd = this.getAgentCwd(userId);
+    this.opts.log(`Creating new session for ${userId} (cwd: ${cwd})`);
 
     const sessionRef: { current?: UserSession } = {};
 
@@ -155,7 +207,7 @@ export class SessionManager {
     const agentInfo = await spawnAgent({
       command: this.opts.agentCommand,
       args: this.opts.agentArgs,
-      cwd: this.opts.agentCwd,
+      cwd,
       env: this.opts.agentEnv,
       client,
       log: (msg) => this.opts.log(`[${userId}] ${msg}`),

@@ -162,6 +162,9 @@ Bridge-owned commands use a **double slash** prefix so they are not confused wit
 | Command | Description |
 |---------|-------------|
 | `//stop` | Cancel the in-flight ACP reply and clear queued messages for this user |
+| `//cd <dir>` | Switch this user's agent working directory and restart ACP (next message spawns a new agent process) |
+
+`//cd` overrides are **in-memory only** for the current bridge process. After a restart, each user's agent cwd comes from `--cwd`, config `agent.cwd`, or the bridge process working directory (whichever applies at startup)—not from a previous `//cd`.
 
 ## Runtime Behavior
 

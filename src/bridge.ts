@@ -189,6 +189,7 @@ export class WeChatAcpBridge {
     if (isBridgeCommandMessage(textBody)) {
       const result = await handleBridgeCommand(textBody, userId, {
         stopInteraction: (uid) => this.sessionManager!.stopInteraction(uid),
+        changeDirectory: (uid, dir) => this.sessionManager!.changeWorkingDirectory(uid, dir),
       });
       if (result.handled) {
         await this.sendReply(userId, contextToken, result.reply);
