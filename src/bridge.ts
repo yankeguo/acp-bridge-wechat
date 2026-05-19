@@ -221,7 +221,7 @@ export class WeChatAcpBridge {
     rawPath: string,
   ): Promise<SendFileResult> {
     const baseCwd = this.sessionManager!.getAgentCwd(userId);
-    const resolved = resolveAgentFile(rawPath, baseCwd);
+    const resolved = await resolveAgentFile(rawPath, baseCwd);
     if (!resolved.ok) {
       return { ok: false, error: resolved.error };
     }

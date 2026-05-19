@@ -152,7 +152,7 @@ export class SessionManager {
    * The next inbound message spawns a fresh agent in the new cwd.
    */
   async changeWorkingDirectory(userId: string, rawPath: string): Promise<ChangeDirectoryResult> {
-    const resolved = resolveAgentDirectory(rawPath, this.opts.agentCwd);
+    const resolved = await resolveAgentDirectory(rawPath, this.opts.agentCwd);
     if (!resolved.ok) {
       return { ok: false, error: resolved.error };
     }
