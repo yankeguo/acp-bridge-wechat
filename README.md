@@ -18,7 +18,6 @@ Bridge WeChat direct messages to any ACP-compatible AI agent.
 - Custom raw agent command support
 - Auto-allow permission requests from the agent
 - Direct message only; group chats are ignored
-- Background daemon mode
 
 ## Requirements
 
@@ -71,8 +70,6 @@ These presets resolve to concrete `command + args` pairs internally, so users do
 ```text
 acp-bridge-wechat --agent <preset|command> [options]
 acp-bridge-wechat agents
-acp-bridge-wechat stop
-acp-bridge-wechat status
 ```
 
 Options:
@@ -80,7 +77,6 @@ Options:
 - `--agent <value>`: built-in preset name or raw agent command
 - `--cwd <dir>`: working directory for the agent process
 - `--login`: force QR re-login and replace the saved token
-- `--daemon`: run in background after startup
 - `--config <file>`: load JSON config file
 - `--instance <name>`: run as a named, isolated instance. See "Running multiple instances" below.
 - `--idle-timeout <minutes>`: session idle timeout, default `1440` (use `0` for unlimited)
@@ -94,12 +90,11 @@ Examples:
 npx acp-bridge-wechat --agent copilot
 npx acp-bridge-wechat --agent claude --cwd D:\code\project
 npx acp-bridge-wechat --agent "npx @github/copilot --acp"
-npx acp-bridge-wechat --agent gemini --daemon
 ```
 
 ## Running multiple instances
 
-By default everything (saved login token, daemon pid/log, sync state) lives under `~/.acp-bridge-wechat/`, which means a single machine can only host one bridge at a time. Pass `--instance <name>` to namespace all of that under `~/.acp-bridge-wechat/instances/<name>/` and run several bridges side by side, each with its own WeChat account and project directory.
+By default everything (saved login token, sync state) lives under `~/.acp-bridge-wechat/`, which means a single machine can only host one bridge at a time. Pass `--instance <name>` to namespace all of that under `~/.acp-bridge-wechat/instances/<name>/` and run several bridges side by side, each with its own WeChat account and project directory.
 
 Typical setup: WeChat account 1 drives project A, WeChat account 2 drives project B.
 
@@ -112,13 +107,6 @@ npx acp-bridge-wechat --instance projB --agent copilot --cwd D:\code\repo-b
 ```
 
 The first run of each instance prints its own QR code. Tokens are saved per instance, so subsequent runs reuse them independently.
-
-The `stop` and `status` subcommands also honor `--instance`:
-
-```bash
-npx acp-bridge-wechat status --instance projA
-npx acp-bridge-wechat stop   --instance projB
-```
 
 Without `--instance`, paths fall back to `~/.acp-bridge-wechat/` exactly as before, so existing installs are unaffected.
 
@@ -178,8 +166,6 @@ By default, runtime files are stored under:
 This directory is used for:
 
 - saved login token
-- daemon pid file
-- daemon log file
 - sync state
 
 When `--instance <name>` is used, the same files live under `~/.acp-bridge-wechat/instances/<name>/` instead, fully isolated from other instances.

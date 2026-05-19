@@ -7,14 +7,10 @@
  *   acp-bridge-wechat --agent "claude code"
  *   acp-bridge-wechat --agent "gemini" --cwd /path/to/project
  *   acp-bridge-wechat --agent "npx tsx ./agent.ts" --login
- *   acp-bridge-wechat --agent "claude code" --daemon
- *   acp-bridge-wechat stop
- *   acp-bridge-wechat status
  */
 
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import qrcodeTerminal from "qrcode-terminal";
 import { WeChatAcpBridge } from "../src/bridge.js";
 import {
@@ -37,8 +33,6 @@ acp-bridge-wechat — Bridge WeChat to any ACP-compatible AI agent
 Usage:
   acp-bridge-wechat --agent <preset|command>  [options]
   acp-bridge-wechat agents                        List built-in agent presets
-  acp-bridge-wechat stop                          Stop a running daemon
-  acp-bridge-wechat status                        Check daemon status
 
 Options:
   --agent <value>     Built-in preset name or raw agent command
@@ -46,10 +40,9 @@ Options:
                       Examples: "copilot", "claude", "npx tsx ./agent.ts"
   --cwd <dir>         Working directory for agent (default: current dir)
   --login             Force re-login (new QR code)
-  --daemon            Run in background after login
   --config <file>     Config file path (JSON)
   --instance <name>   Run as a named, isolated instance.
-                      Storage, token, and daemon pid/log are scoped to
+                      Storage and token are scoped to
                       ~/.acp-bridge-wechat/instances/<name>/.
                       Lets you run multiple bridges side by side, each with
                       its own WeChat account and project cwd.
@@ -67,7 +60,6 @@ function parseArgs(argv: string[]): {
   agent?: string;
   cwd?: string;
   forceLogin: boolean;
-  daemon: boolean;
   configFile?: string;
   instance?: string;
   idleTimeout?: number;
@@ -78,7 +70,6 @@ function parseArgs(argv: string[]): {
 } {
   const result = {
     forceLogin: false,
-    daemon: false,
     hideThoughts: false,
     verbose: false,
     help: false,
@@ -104,9 +95,6 @@ function parseArgs(argv: string[]): {
         break;
       case "--login":
         result.forceLogin = true;
-        break;
-      case "--daemon":
-        result.daemon = true;
         break;
       case "--config":
         result.configFile = args[++i];
@@ -159,72 +147,6 @@ function handleAgents(config: WeChatAcpConfig): void {
   }
 }
 
-function handleStop(config: WeChatAcpConfig): void {
-  const pidFile = config.daemon.pidFile;
-  if (!fs.existsSync(pidFile)) {
-    console.log("No daemon running (no PID file found)");
-    return;
-  }
-
-  const pid = parseInt(fs.readFileSync(pidFile, "utf-8").trim(), 10);
-  try {
-    process.kill(pid, "SIGTERM");
-    fs.unlinkSync(pidFile);
-    console.log(`Stopped daemon (PID ${pid})`);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ESRCH") {
-      fs.unlinkSync(pidFile);
-      console.log(`Daemon not running (stale PID ${pid}), cleaned up`);
-    } else {
-      console.error(`Failed to stop daemon: ${String(err)}`);
-    }
-  }
-}
-
-function handleStatus(config: WeChatAcpConfig): void {
-  const pidFile = config.daemon.pidFile;
-  if (!fs.existsSync(pidFile)) {
-    console.log("Not running");
-    return;
-  }
-
-  const pid = parseInt(fs.readFileSync(pidFile, "utf-8").trim(), 10);
-  try {
-    process.kill(pid, 0); // test if process exists
-    console.log(`Running (PID ${pid})`);
-  } catch {
-    console.log(`Not running (stale PID ${pid})`);
-    fs.unlinkSync(pidFile);
-  }
-}
-
-function daemonize(config: WeChatAcpConfig): void {
-  const logFile = config.daemon.logFile;
-  const pidFile = config.daemon.pidFile;
-
-  fs.mkdirSync(path.dirname(logFile), { recursive: true });
-  fs.mkdirSync(path.dirname(pidFile), { recursive: true });
-
-  const out = fs.openSync(logFile, "a");
-  const err = fs.openSync(logFile, "a");
-
-  // Re-run ourselves with --no-daemon (internal flag) as a detached process
-  const args = process.argv.slice(1).filter((a) => a !== "--daemon");
-  const child = spawn(process.execPath, args, {
-    detached: true,
-    stdio: ["ignore", out, err],
-    env: { ...process.env, ACP_BRIDGE_WECHAT_DAEMON: "1" },
-    windowsHide: true,
-  });
-
-  child.unref();
-  fs.writeFileSync(pidFile, String(child.pid), "utf-8");
-  console.log(`Daemon started (PID ${child.pid})`);
-  console.log(`Logs: ${logFile}`);
-  console.log(`PID file: ${pidFile}`);
-  process.exit(0);
-}
-
 function renderQrInTerminal(url: string): void {
   qrcodeTerminal.generate(url, { small: true }, (qr: string) => {
     console.log(qr);
@@ -257,7 +179,6 @@ async function main(): Promise<void> {
     Object.assign(config.agent, fileConfig.agent ?? {});
     Object.assign(config.agents, fileConfig.agents ?? {});
     Object.assign(config.session, fileConfig.session ?? {});
-    Object.assign(config.daemon, fileConfig.daemon ?? {});
     Object.assign(config.storage, fileConfig.storage ?? {});
   }
 
@@ -266,8 +187,6 @@ async function main(): Promise<void> {
   if (args.instance) {
     config.storage.instance = args.instance;
     config.storage.dir = defaultStorageDir(args.instance);
-    config.daemon.logFile = path.join(config.storage.dir, "acp-bridge-wechat.log");
-    config.daemon.pidFile = path.join(config.storage.dir, "daemon.pid");
   }
 
   // Handle subcommands
@@ -275,13 +194,10 @@ async function main(): Promise<void> {
     handleAgents(config);
     return;
   }
-  if (args.command === "stop") {
-    handleStop(config);
-    return;
-  }
-  if (args.command === "status") {
-    handleStatus(config);
-    return;
+  if (args.command) {
+    console.error(`Unknown command: ${args.command}`);
+    usage();
+    process.exit(1);
   }
 
   const agentSelection = args.agent ?? config.agent.preset;
@@ -314,13 +230,6 @@ async function main(): Promise<void> {
   }
   if (args.maxSessions) config.session.maxConcurrentUsers = args.maxSessions;
   if (args.hideThoughts) config.agent.showThoughts = false;
-  config.daemon.enabled = args.daemon;
-
-  // Handle daemon mode
-  if (args.daemon && !process.env.ACP_BRIDGE_WECHAT_DAEMON) {
-    daemonize(config);
-    return;
-  }
 
   // Create and start bridge
   const bridge = new WeChatAcpBridge(config, (msg) => {
