@@ -22,6 +22,8 @@ export interface UserSession {
   agentInfo: AgentProcessInfo;
   queue: PendingMessage[];
   processing: boolean;
+  /** When true, suppress agent replies (e.g. after //stop). */
+  suppressOutbound: boolean;
   lastActivity: number;
   createdAt: number;
 }
@@ -104,12 +106,48 @@ export class SessionManager {
     return this.sessions.size;
   }
 
+  /**
+   * Interrupt the current ACP turn for a user: cancel in-flight prompt and drop queued messages.
+   */
+  async stopInteraction(userId: string): Promise<"no_session" | "idle" | "stopped"> {
+    const session = this.sessions.get(userId);
+    if (!session) {
+      return "no_session";
+    }
+
+    session.queue.length = 0;
+    session.lastActivity = Date.now();
+
+    if (!session.processing) {
+      return "idle";
+    }
+
+    session.suppressOutbound = true;
+
+    try {
+      await session.agentInfo.connection.cancel({
+        sessionId: session.agentInfo.sessionId,
+      });
+      this.opts.log(`[${userId}] Sent session/cancel`);
+    } catch (err) {
+      this.opts.log(`[${userId}] session/cancel failed: ${String(err)}`);
+    }
+
+    return "stopped";
+  }
+
   private async createSession(userId: string, contextToken: string): Promise<UserSession> {
     this.opts.log(`Creating new session for ${userId}`);
 
+    const sessionRef: { current?: UserSession } = {};
+
     const client = new WeChatAcpClient({
       sendTyping: () => this.opts.sendTyping(userId, contextToken),
-      onThoughtFlush: (text) => this.opts.onReply(userId, contextToken, text),
+      onThoughtFlush: async (text) => {
+        const s = sessionRef.current;
+        if (s?.suppressOutbound) return;
+        await this.opts.onReply(userId, contextToken, text);
+      },
       log: (msg) => this.opts.log(`[${userId}] ${msg}`),
       showThoughts: this.opts.showThoughts,
     });
@@ -132,16 +170,19 @@ export class SessionManager {
       }
     });
 
-    return {
+    const session: UserSession = {
       userId,
       contextToken,
       client,
       agentInfo,
       queue: [],
       processing: false,
+      suppressOutbound: false,
       lastActivity: Date.now(),
       createdAt: Date.now(),
     };
+    sessionRef.current = session;
+    return session;
   }
 
   private async processQueue(session: UserSession): Promise<void> {
@@ -152,7 +193,10 @@ export class SessionManager {
         // Keep the ACP client instance stable because the connection is bound to it.
         session.client.updateCallbacks({
           sendTyping: () => this.opts.sendTyping(session.userId, pending.contextToken),
-          onThoughtFlush: (text) => this.opts.onReply(session.userId, pending.contextToken, text),
+          onThoughtFlush: async (text) => {
+            if (session.suppressOutbound) return;
+            await this.opts.onReply(session.userId, pending.contextToken, text);
+          },
         });
 
         // Reset chunks for the new turn
@@ -169,8 +213,15 @@ export class SessionManager {
             prompt: pending.prompt,
           });
 
-          // Collect accumulated text
+          const suppress = session.suppressOutbound;
+          session.suppressOutbound = false;
+
           let replyText = await session.client.flush();
+
+          if (suppress) {
+            this.opts.log(`[${session.userId}] Agent turn ended (${result.stopReason}), reply suppressed after stop`);
+            continue;
+          }
 
           if (result.stopReason === "cancelled") {
             replyText += "\n[cancelled]";
@@ -180,7 +231,6 @@ export class SessionManager {
 
           this.opts.log(`[${session.userId}] Agent done (${result.stopReason}), reply ${replyText.length} chars`);
 
-          // Send reply back to WeChat
           if (replyText.trim()) {
             await this.opts.onReply(session.userId, pending.contextToken, replyText);
           }
