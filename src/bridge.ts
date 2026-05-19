@@ -15,12 +15,8 @@ import type { WeixinMessage } from "./weixin/api/types.js";
 import { WeixinConfigManager } from "./weixin/api/config-cache.js";
 import { setWeixinRuntimeConfig } from "./weixin/api/runtime-config.js";
 import { initWeixinLogger } from "./weixin/util/logger.js";
-import { setDebugModeStorageDir } from "./weixin/messaging/debug-mode.js";
-import { handleSlashCommand } from "./weixin/messaging/slash-commands.js";
-import { extractTextBody } from "./weixin/messaging/inbound.js";
 import { assertSessionActive } from "./weixin/api/session-guard.js";
-import { restoreContextTokens, setContextToken } from "./weixin/storage/context-tokens.js";
-import { isDebugMode } from "./weixin/messaging/debug-mode.js";
+import { restoreContextTokens, resolveContextToken } from "./weixin/storage/context-tokens.js";
 import { SessionManager } from "./acp/session.js";
 import { weixinMessageToPrompt } from "./adapter/inbound.js";
 import { formatForWeChat } from "./adapter/outbound.js";
@@ -60,7 +56,6 @@ export class WeChatAcpBridge {
     const { forceLogin, renderQrUrl } = opts ?? {};
 
     restoreContextTokens(this.config.storage.dir);
-    setDebugModeStorageDir(this.config.storage.dir);
 
     if (!forceLogin) {
       this.tokenData = loadToken(this.config.storage.dir);
@@ -119,6 +114,7 @@ export class WeChatAcpBridge {
       token: this.tokenData.token,
       storageDir: this.config.storage.dir,
       accountId: this.tokenData.accountId,
+      configManager: this.configManager,
       abortSignal: this.abortController.signal,
       log: this.log,
       onMessage: (msg, typingTicket) => this.handleMessage(msg, typingTicket),
@@ -152,12 +148,18 @@ export class WeChatAcpBridge {
     if (msg.group_id) return;
 
     const userId = msg.from_user_id;
-    const contextToken = msg.context_token;
-    if (!userId || !contextToken) return;
+    if (!userId) return;
 
-    if (msg.context_token) {
-      setContextToken(this.config.storage.dir, userId, msg.context_token);
+    const contextToken = resolveContextToken(
+      this.config.storage.dir,
+      userId,
+      msg.context_token,
+    );
+    if (!contextToken) {
+      this.log(`No context_token for ${userId}, skipping message`);
+      return;
     }
+
     if (typingTicket) {
       this.typingTickets.set(userId, typingTicket);
     }
@@ -181,28 +183,6 @@ export class WeChatAcpBridge {
       return;
     }
 
-    const textBody = extractTextBody(msg);
-    if (textBody.startsWith("/")) {
-      const slash = await handleSlashCommand(
-        textBody,
-        {
-          to: userId,
-          contextToken,
-          baseUrl: this.tokenData!.baseUrl,
-          token: this.tokenData!.token,
-          accountId: this.tokenData!.accountId,
-          log: this.log,
-          errLog: this.log,
-        },
-        Date.now(),
-        msg.create_time_ms,
-      );
-      if (slash.handled) {
-        this.log(`Slash command handled for ${userId}`);
-        return;
-      }
-    }
-
     const mediaDir = path.join(this.config.storage.dir, "media");
     const prompt = await weixinMessageToPrompt(msg, {
       cdnBaseUrl: this.config.wechat.cdnBaseUrl,
@@ -216,23 +196,28 @@ export class WeChatAcpBridge {
   private async sendReply(userId: string, contextToken: string, text: string): Promise<void> {
     assertSessionActive(this.tokenData!.accountId);
 
-    let outbound = text;
-    if (isDebugMode(this.tokenData!.accountId)) {
-      outbound += `\n\n⏱ [debug] reply delivered at ${new Date().toISOString()}`;
+    const resolvedToken = resolveContextToken(
+      this.config.storage.dir,
+      userId,
+      contextToken,
+    );
+    if (!resolvedToken) {
+      this.log(`Cannot send reply to ${userId}: no context_token available`);
+      return;
     }
 
-    const formatted = formatForWeChat(outbound);
+    const formatted = formatForWeChat(text);
     const segments = splitText(formatted, TEXT_CHUNK_LIMIT);
 
     for (const segment of segments) {
       await sendTextMessage(userId, segment, {
         baseUrl: this.tokenData!.baseUrl,
         token: this.tokenData!.token,
-        contextToken,
+        contextToken: resolvedToken,
       });
     }
 
-    this.cancelTypingIndicator(userId, contextToken).catch(() => {});
+    this.cancelTypingIndicator(userId, resolvedToken).catch(() => {});
   }
 
   private async cancelTypingIndicator(userId: string, contextToken: string): Promise<void> {
@@ -258,7 +243,14 @@ export class WeChatAcpBridge {
   private async sendTypingIndicator(userId: string, contextToken: string): Promise<void> {
     try {
       assertSessionActive(this.tokenData!.accountId);
-      const ticket = await this.resolveTypingTicket(userId, contextToken);
+      const resolvedToken = resolveContextToken(
+        this.config.storage.dir,
+        userId,
+        contextToken,
+      );
+      if (!resolvedToken) return;
+
+      const ticket = await this.resolveTypingTicket(userId, resolvedToken);
       if (!ticket) return;
 
       await sendTyping({

@@ -48,10 +48,29 @@ export function restoreContextTokens(storageDir: string): void {
 }
 
 export function setContextToken(storageDir: string, userId: string, token: string): void {
-  contextTokenStore.set(contextTokenKey(storageDir, userId), token);
+  const trimmed = token.trim();
+  if (!trimmed) return;
+  contextTokenStore.set(contextTokenKey(storageDir, userId), trimmed);
   persistContextTokens(storageDir);
 }
 
 export function getContextToken(storageDir: string, userId: string): string | undefined {
   return contextTokenStore.get(contextTokenKey(storageDir, userId));
+}
+
+/**
+ * Prefer the token from the current message; fall back to the last persisted token
+ * for this user (survives restarts and messages missing context_token).
+ */
+export function resolveContextToken(
+  storageDir: string,
+  userId: string,
+  incoming?: string,
+): string | undefined {
+  const trimmed = incoming?.trim();
+  if (trimmed) {
+    setContextToken(storageDir, userId, trimmed);
+    return trimmed;
+  }
+  return getContextToken(storageDir, userId);
 }

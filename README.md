@@ -151,12 +151,9 @@ You can also override or add agent presets:
 
 ## WeChat protocol layer
 
-The WeChat iLink client in `src/weixin/` is vendored from [@tencent-weixin/openclaw-weixin](https://www.npmjs.com/package/@tencent-weixin/openclaw-weixin) (protocol, login, CDN media, lifecycle). OpenClaw-specific integration is not included.
+The WeChat iLink client in `src/weixin/` is vendored from [@tencent-weixin/openclaw-weixin](https://www.npmjs.com/package/@tencent-weixin/openclaw-weixin) (protocol, login, CDN media, lifecycle). OpenClaw-specific integration (slash commands, debug tracing, pairing) is not included.
 
-Built-in WeChat slash commands (handled before the ACP agent):
-
-- `/echo <message>` — echo back with timing stats
-- `/toggle-debug` — toggle per-bot debug mode flag
+Outbound file upload via CDN (`src/weixin/cdn/`) is retained for a planned feature to send images/files to users.
 
 ## Runtime Behavior
 

@@ -3,7 +3,7 @@
  */
 
 import { getUpdates } from "../api/api.js";
-import { WeixinConfigManager } from "../api/config-cache.js";
+import type { WeixinConfigManager } from "../api/config-cache.js";
 import {
   SESSION_EXPIRED_ERRCODE,
   pauseSession,
@@ -23,6 +23,7 @@ export interface MonitorOpts {
   token?: string;
   storageDir: string;
   accountId?: string;
+  configManager: WeixinConfigManager;
   abortSignal?: AbortSignal;
   longPollTimeoutMs?: number;
   log: (msg: string) => void;
@@ -48,7 +49,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 export async function startMonitor(opts: MonitorOpts): Promise<void> {
-  const { baseUrl, token, storageDir, abortSignal, log, onMessage } = opts;
+  const { baseUrl, token, storageDir, abortSignal, log, onMessage, configManager } = opts;
   const accountId = opts.accountId ?? "default";
 
   let getUpdatesBuf = loadGetUpdatesBuf(storageDir);
@@ -58,7 +59,6 @@ export async function startMonitor(opts: MonitorOpts): Promise<void> {
     log("No previous sync buf, starting fresh");
   }
 
-  const configManager = new WeixinConfigManager({ baseUrl, token }, log);
   let nextTimeoutMs = opts.longPollTimeoutMs ?? DEFAULT_LONG_POLL_TIMEOUT_MS;
   let consecutiveFailures = 0;
 
