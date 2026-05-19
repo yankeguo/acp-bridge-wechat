@@ -15,7 +15,6 @@ import { SessionManager } from "./acp/session.js";
 import { weixinMessageToPrompt } from "./adapter/inbound.js";
 import { formatForWeChat } from "./adapter/outbound.js";
 import type { WeChatAcpConfig } from "./config.js";
-import { trackEvent, trackException, hashUserId } from "./telemetry/index.js";
 
 const TEXT_CHUNK_LIMIT = 4000;
 
@@ -42,34 +41,16 @@ export class WeChatAcpBridge {
     // 1. Login or load token
     if (!forceLogin) {
       this.tokenData = loadToken(this.config.storage.dir);
-      if (this.tokenData) {
-        trackEvent("token.reused");
-      }
     }
 
     if (!this.tokenData) {
-      const loginStart = Date.now();
-      try {
-        this.tokenData = await login({
-          baseUrl: this.config.wechat.baseUrl,
-          botType: this.config.wechat.botType,
-          storageDir: this.config.storage.dir,
-          log: this.log,
-          renderQrUrl,
-        });
-        trackEvent("login.success", {
-          forced: !!forceLogin,
-          durationMs: Date.now() - loginStart,
-        });
-      } catch (err) {
-        trackException(err, "auth");
-        trackEvent("login.failure", {
-          forced: !!forceLogin,
-          durationMs: Date.now() - loginStart,
-          errorType: err instanceof Error ? err.name : "Unknown",
-        });
-        throw err;
-      }
+      this.tokenData = await login({
+        baseUrl: this.config.wechat.baseUrl,
+        botType: this.config.wechat.botType,
+        storageDir: this.config.storage.dir,
+        log: this.log,
+        renderQrUrl,
+      });
     } else {
       this.log(`Loaded saved token (Bot: ${this.tokenData.accountId}, saved at ${this.tokenData.savedAt})`);
       this.log(`Use --login to force re-login`);
@@ -81,7 +62,6 @@ export class WeChatAcpBridge {
       agentArgs: this.config.agent.args,
       agentCwd: this.config.agent.cwd,
       agentEnv: this.config.agent.env,
-      agentPreset: this.config.agent.preset ?? "raw",
       idleTimeoutMs: this.config.session.idleTimeoutMs,
       maxConcurrentUsers: this.config.session.maxConcurrentUsers,
       showThoughts: this.config.agent.showThoughts,
@@ -123,15 +103,9 @@ export class WeChatAcpBridge {
 
     this.log(`Message from ${userId}: ${this.previewMessage(msg)}`);
 
-    trackEvent("message.received", {
-      userIdHash: hashUserId(userId),
-      kind: this.messageKind(msg),
-    });
-
     // Convert and enqueue — fire-and-forget (don't block the poll loop)
     this.enqueueMessage(msg, userId, contextToken).catch((err) => {
       this.log(`Failed to enqueue message from ${userId}: ${String(err)}`);
-      trackException(err, "enqueue");
     });
   }
 
@@ -152,25 +126,13 @@ export class WeChatAcpBridge {
   private async sendReply(userId: string, contextToken: string, text: string): Promise<void> {
     const formatted = formatForWeChat(text);
     const segments = splitText(formatted, TEXT_CHUNK_LIMIT);
-    const startedAt = Date.now();
 
-    try {
-      for (const segment of segments) {
-        await sendTextMessage(userId, segment, {
-          baseUrl: this.tokenData!.baseUrl,
-          token: this.tokenData!.token,
-          contextToken,
-        });
-      }
-      trackEvent("reply.sent", {
-        userIdHash: hashUserId(userId),
-        segments: segments.length,
-        chars: formatted.length,
-        durationMs: Date.now() - startedAt,
+    for (const segment of segments) {
+      await sendTextMessage(userId, segment, {
+        baseUrl: this.tokenData!.baseUrl,
+        token: this.tokenData!.token,
+        contextToken,
       });
-    } catch (err) {
-      trackException(err, "reply");
-      throw err;
     }
 
     // Cancel typing indicator after reply is sent
@@ -249,17 +211,5 @@ export class WeChatAcpBridge {
       if (item.type === 5) return "[video]";
     }
     return "[empty]";
-  }
-
-  private messageKind(msg: WeixinMessage): string {
-    const items = msg.item_list ?? [];
-    for (const item of items) {
-      if (item.type === 1) return "text";
-      if (item.type === 2) return "image";
-      if (item.type === 3) return "voice";
-      if (item.type === 4) return "file";
-      if (item.type === 5) return "video";
-    }
-    return "empty";
   }
 }

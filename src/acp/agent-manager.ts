@@ -7,7 +7,6 @@ import { Writable, Readable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import packageJson from "../../package.json" with { type: "json" };
 import type { WeChatAcpClient } from "./client.js";
-import { trackException } from "../telemetry/index.js";
 
 export interface AgentProcessInfo {
   process: ChildProcess;
@@ -40,7 +39,6 @@ export async function spawnAgent(params: {
 
   proc.on("error", (err) => {
     log(`Agent process error: ${String(err)}`);
-    trackException(err, "agent_spawn");
   });
 
   proc.on("exit", (code, signal) => {
@@ -49,9 +47,7 @@ export async function spawnAgent(params: {
 
   if (!proc.stdin || !proc.stdout) {
     proc.kill();
-    const err = new Error("Failed to get agent process stdio");
-    trackException(err, "agent_spawn");
-    throw err;
+    throw new Error("Failed to get agent process stdio");
   }
 
   const input = Writable.toWeb(proc.stdin);

@@ -25,13 +25,6 @@ import {
   validateInstanceName,
 } from "../src/config.js";
 import type { WeChatAcpConfig } from "../src/config.js";
-import {
-  initTelemetry,
-  trackEvent,
-  trackException,
-  shutdownTelemetry,
-} from "../src/telemetry/index.js";
-import packageJson from "../package.json" with { type: "json" };
 
 function usage(): void {
   const presets = listBuiltInAgents()
@@ -56,8 +49,8 @@ Options:
   --daemon            Run in background after login
   --config <file>     Config file path (JSON)
   --instance <name>   Run as a named, isolated instance.
-                      Storage, token, daemon pid/log, and telemetry id are
-                      scoped to ~/.acp-bridge-wechat/instances/<name>/.
+                      Storage, token, and daemon pid/log are scoped to
+                      ~/.acp-bridge-wechat/instances/<name>/.
                       Lets you run multiple bridges side by side, each with
                       its own WeChat account and project cwd.
   --idle-timeout <m>  Session idle timeout in minutes (default: 1440)
@@ -329,19 +322,6 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Initialize telemetry. No-op when ACP_BRIDGE_WECHAT_TELEMETRY=0/false/off.
-  initTelemetry({
-    version: packageJson.version,
-    storageDir: config.storage.dir,
-    agentPreset: config.agent.preset ?? "raw",
-    daemon: config.daemon.enabled,
-  });
-  trackEvent("app.start", {
-    agentPreset: config.agent.preset ?? "raw",
-    daemon: config.daemon.enabled,
-  });
-  const startedAt = Date.now();
-
   // Create and start bridge
   const bridge = new WeChatAcpBridge(config, (msg) => {
     const ts = new Date().toISOString().substring(11, 19);
@@ -350,9 +330,7 @@ async function main(): Promise<void> {
 
   // Handle graceful shutdown
   const shutdown = async (reason: "signal" | "error" | "normal") => {
-    trackEvent("app.stop", { reason, uptimeSec: Math.round((Date.now() - startedAt) / 1000) });
     await bridge.stop();
-    await shutdownTelemetry();
     process.exit(reason === "error" ? 1 : 0);
   };
   process.on("SIGINT", () => void shutdown("signal"));
@@ -367,9 +345,6 @@ async function main(): Promise<void> {
     if ((err as Error).message === "aborted") {
       // Normal shutdown
     } else {
-      trackException(err, "main");
-      trackEvent("app.stop", { reason: "error", uptimeSec: Math.round((Date.now() - startedAt) / 1000) });
-      await shutdownTelemetry();
       console.error(`Fatal: ${String(err)}`);
       process.exit(1);
     }

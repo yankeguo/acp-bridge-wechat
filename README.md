@@ -99,7 +99,7 @@ npx acp-bridge-wechat --agent gemini --daemon
 
 ## Running multiple instances
 
-By default everything (saved login token, daemon pid/log, sync state, telemetry id) lives under `~/.acp-bridge-wechat/`, which means a single machine can only host one bridge at a time. Pass `--instance <name>` to namespace all of that under `~/.acp-bridge-wechat/instances/<name>/` and run several bridges side by side, each with its own WeChat account and project directory.
+By default everything (saved login token, daemon pid/log, sync state) lives under `~/.acp-bridge-wechat/`, which means a single machine can only host one bridge at a time. Pass `--instance <name>` to namespace all of that under `~/.acp-bridge-wechat/instances/<name>/` and run several bridges side by side, each with its own WeChat account and project directory.
 
 Typical setup: WeChat account 1 drives project A, WeChat account 2 drives project B.
 
@@ -181,7 +181,6 @@ This directory is used for:
 - daemon pid file
 - daemon log file
 - sync state
-- anonymous telemetry install id (`telemetry-id`, see Telemetry section)
 
 When `--instance <name>` is used, the same files live under `~/.acp-bridge-wechat/instances/<name>/` instead, fully isolated from other instances.
 
@@ -213,31 +212,6 @@ Watch mode:
 ```bash
 npm run dev
 ```
-
-## Telemetry
-
-`acp-bridge-wechat` collects anonymous usage telemetry via Azure Application Insights to help understand which agent presets are used and to detect crashes.
-
-**To disable telemetry**, set the `ACP_BRIDGE_WECHAT_TELEMETRY` environment variable to `0`, `false`, or `off` before running:
-
-```bash
-ACP_BRIDGE_WECHAT_TELEMETRY=0 npx acp-bridge-wechat --agent copilot
-```
-
-**What is collected** (9 event types only):
-
-- `app.start` / `app.stop` — process lifecycle, agent preset name, daemon flag, uptime
-- `login.success` / `login.failure` / `token.reused` — WeChat login outcomes (no token, no QR URL)
-- `message.received` — message arrived; only the categorical kind (`text` / `image` / `voice` / `file` / `video` / `empty`) and a hashed user id
-- `session.created` — new ACP session opened
-- `prompt.completed` — ACP turn finished; agent preset, stop reason, duration, reply length
-- `reply.sent` — reply pushed back to WeChat; segment count, total length
-
-Plus exception reports for `monitor`, `prompt`, `reply`, `auth`, `agent_spawn`, and `enqueue` failures.
-
-**What is never collected**: message bodies, filenames, voice transcripts, image URLs, login tokens, QR codes, raw agent command strings, environment variables, working directory paths, raw WeChat user IDs.
-
-User IDs are sha256-hashed with a per-install salt stored in `~/.acp-bridge-wechat/telemetry-id`. The salt is generated on first run and never leaves your machine. Delete the file to rotate it.
 
 ## License
 

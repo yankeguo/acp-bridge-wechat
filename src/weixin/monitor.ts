@@ -7,7 +7,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { getUpdates } from "./api.js";
 import type { WeixinMessage, GetUpdatesResp } from "./types.js";
-import { trackException } from "../telemetry/index.js";
 
 const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const MAX_CONSECUTIVE_FAILURES = 3;
@@ -122,7 +121,6 @@ export async function startMonitor(opts: MonitorOpts): Promise<void> {
 
       consecutiveFailures++;
       log(`getUpdates error (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): ${String(err)}`);
-      trackException(err, "monitor");
 
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
         log(`${MAX_CONSECUTIVE_FAILURES} consecutive failures, backing off ${BACKOFF_DELAY_MS / 1000}s`);
