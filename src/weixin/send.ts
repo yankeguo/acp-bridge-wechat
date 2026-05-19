@@ -21,7 +21,7 @@ export async function sendTextMessage(
     throw new Error("contextToken is required to send a message");
   }
 
-  const clientId = `wechat-acp-${crypto.randomUUID()}`;
+  const clientId = `acp-bridge-wechat-${crypto.randomUUID()}`;
   await sendMessage({
     baseUrl: opts.baseUrl,
     token: opts.token,

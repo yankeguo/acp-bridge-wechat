@@ -1,6 +1,6 @@
 {
-  "name": "wechat-acp",
-  "version": "0.2.0",
+  "name": "acp-bridge-wechat",
+  "version": "0.1.0",
   "description": "Bridge WeChat to any ACP-compatible AI agent",
   "type": "module",
   "files": [
@@ -9,7 +9,7 @@
     "package.json"
   ],
   "bin": {
-    "wechat-acp": "./dist/bin/wechat-acp.js"
+    "acp-bridge-wechat": "./dist/bin/acp-bridge-wechat.js"
   },
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
@@ -22,7 +22,7 @@
   "scripts": {
     "build": "tsc",
     "prepack": "npm run build",
-    "start": "node dist/bin/wechat-acp.js",
+    "start": "node dist/bin/acp-bridge-wechat.js",
     "dev": "tsc --watch"
   },
   "dependencies": {
@@ -39,11 +39,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/formulahendry/wechat-acp.git"
+    "url": "git+https://github.com/yankeguo/acp-bridge-wechat.git"
   },
-  "homepage": "https://github.com/formulahendry/wechat-acp#readme",
+  "homepage": "https://github.com/yankeguo/acp-bridge-wechat#readme",
   "bugs": {
-    "url": "https://github.com/formulahendry/wechat-acp/issues"
+    "url": "https://github.com/yankeguo/acp-bridge-wechat/issues"
   },
   "license": "MIT",
   "keywords": [
