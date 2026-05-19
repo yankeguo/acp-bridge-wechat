@@ -2,7 +2,8 @@
 
 ## 0.2.0
 
-- Add `--instance <name>` to run multiple bridges side by side on one machine, each with its own WeChat account, project cwd, daemon pid/log, sync state, and telemetry id. Storage moves under `~/.wechat-acp/instances/<name>/`. Default (no `--instance`) is unchanged.
+- Rename npm package and CLI from `wechat-acp` to `acp-bridge-wechat`; default storage is `~/.acp-bridge-wechat/`; telemetry uses `ACP_BRIDGE_WECHAT_TELEMETRY`
+- Add `--instance <name>` to run multiple bridges side by side on one machine, each with its own WeChat account, project cwd, daemon pid/log, sync state, and telemetry id. Storage moves under `~/.acp-bridge-wechat/instances/<name>/`. Default (no `--instance`) is unchanged.
 
 ## 0.1.4
 
@@ -11,7 +12,7 @@
 ## 0.1.3
 
 - Forward agent thinking to WeChat by default; use `--hide-thoughts` to opt out (replaces `--show-thoughts`)
-- Add anonymous usage telemetry via Azure Application Insights; set `WECHAT_ACP_TELEMETRY=0` to disable
+- Add anonymous usage telemetry via Azure Application Insights; set `ACP_BRIDGE_WECHAT_TELEMETRY=0` to disable
 - Hide Windows console windows for daemon and agent child processes
 
 ## 0.1.2

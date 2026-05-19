@@ -30,7 +30,7 @@ export class WeChatAcpBridge {
 
   constructor(config: WeChatAcpConfig, log?: (msg: string) => void) {
     this.config = config;
-    this.log = log ?? ((msg: string) => console.log(`[wechat-acp] ${msg}`));
+    this.log = log ?? ((msg: string) => console.log(`[acp-bridge-wechat] ${msg}`));
   }
 
   async start(opts?: {

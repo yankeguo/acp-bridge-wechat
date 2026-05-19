@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 
 /**
- * wechat-acp CLI entry point.
+ * acp-bridge-wechat CLI entry point.
  *
  * Usage:
- *   wechat-acp --agent "claude code"
- *   wechat-acp --agent "gemini" --cwd /path/to/project
- *   wechat-acp --agent "npx tsx ./agent.ts" --login
- *   wechat-acp --agent "claude code" --daemon
- *   wechat-acp stop
- *   wechat-acp status
+ *   acp-bridge-wechat --agent "claude code"
+ *   acp-bridge-wechat --agent "gemini" --cwd /path/to/project
+ *   acp-bridge-wechat --agent "npx tsx ./agent.ts" --login
+ *   acp-bridge-wechat --agent "claude code" --daemon
+ *   acp-bridge-wechat stop
+ *   acp-bridge-wechat status
  */
 
 import fs from "node:fs";
@@ -39,13 +39,13 @@ function usage(): void {
     .join(", ");
 
   console.log(`
-wechat-acp — Bridge WeChat to any ACP-compatible AI agent
+acp-bridge-wechat — Bridge WeChat to any ACP-compatible AI agent
 
 Usage:
-  wechat-acp --agent <preset|command>  [options]
-  wechat-acp agents                        List built-in agent presets
-  wechat-acp stop                          Stop a running daemon
-  wechat-acp status                        Check daemon status
+  acp-bridge-wechat --agent <preset|command>  [options]
+  acp-bridge-wechat agents                        List built-in agent presets
+  acp-bridge-wechat stop                          Stop a running daemon
+  acp-bridge-wechat status                        Check daemon status
 
 Options:
   --agent <value>     Built-in preset name or raw agent command
@@ -57,7 +57,7 @@ Options:
   --config <file>     Config file path (JSON)
   --instance <name>   Run as a named, isolated instance.
                       Storage, token, daemon pid/log, and telemetry id are
-                      scoped to ~/.wechat-acp/instances/<name>/.
+                      scoped to ~/.acp-bridge-wechat/instances/<name>/.
                       Lets you run multiple bridges side by side, each with
                       its own WeChat account and project cwd.
   --idle-timeout <m>  Session idle timeout in minutes (default: 1440)
@@ -220,7 +220,7 @@ function daemonize(config: WeChatAcpConfig): void {
   const child = spawn(process.execPath, args, {
     detached: true,
     stdio: ["ignore", out, err],
-    env: { ...process.env, WECHAT_ACP_DAEMON: "1" },
+    env: { ...process.env, ACP_BRIDGE_WECHAT_DAEMON: "1" },
     windowsHide: true,
   });
 
@@ -273,7 +273,7 @@ async function main(): Promise<void> {
   if (args.instance) {
     config.storage.instance = args.instance;
     config.storage.dir = defaultStorageDir(args.instance);
-    config.daemon.logFile = path.join(config.storage.dir, "wechat-acp.log");
+    config.daemon.logFile = path.join(config.storage.dir, "acp-bridge-wechat.log");
     config.daemon.pidFile = path.join(config.storage.dir, "daemon.pid");
   }
 
@@ -324,12 +324,12 @@ async function main(): Promise<void> {
   config.daemon.enabled = args.daemon;
 
   // Handle daemon mode
-  if (args.daemon && !process.env.WECHAT_ACP_DAEMON) {
+  if (args.daemon && !process.env.ACP_BRIDGE_WECHAT_DAEMON) {
     daemonize(config);
     return;
   }
 
-  // Initialize telemetry. No-op when WECHAT_ACP_TELEMETRY=0/false/off.
+  // Initialize telemetry. No-op when ACP_BRIDGE_WECHAT_TELEMETRY=0/false/off.
   initTelemetry({
     version: packageJson.version,
     storageDir: config.storage.dir,

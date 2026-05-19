@@ -6,7 +6,7 @@
  *   - WeChat user IDs are sha256-hashed with a per-install salt and truncated.
  *   - Only the 9 categorical events declared in `EventName` are emitted.
  *
- * Disable: set environment variable `WECHAT_ACP_TELEMETRY=0` (or `false` / `off`).
+ * Disable: set environment variable `ACP_BRIDGE_WECHAT_TELEMETRY=0` (or `false` / `off`).
  */
 
 import fs from "node:fs";
@@ -47,7 +47,7 @@ let installId = "";
 let disabled = false;
 
 function isDisabledByEnv(): boolean {
-  const v = (process.env.WECHAT_ACP_TELEMETRY ?? "").trim().toLowerCase();
+  const v = (process.env.ACP_BRIDGE_WECHAT_TELEMETRY ?? "").trim().toLowerCase();
   return v === "0" || v === "false" || v === "off";
 }
 
@@ -115,7 +115,7 @@ export function initTelemetry(opts: {
       .start();
 
     const c = appInsights.defaultClient as unknown as AppInsightsClient;
-    c.context.tags[c.context.keys.cloudRole] = "wechat-acp";
+    c.context.tags[c.context.keys.cloudRole] = "acp-bridge-wechat";
     c.context.tags[c.context.keys.userId] = installId;
     c.commonProperties = {
       version: opts.version,
@@ -165,7 +165,7 @@ export function trackException(err: unknown, area: string): void {
  */
 export function hashUserId(userId: string): string {
   if (!userId) return "";
-  const salt = installId || "wechat-acp";
+  const salt = installId || "acp-bridge-wechat";
   return crypto.createHash("sha256").update(salt).update(userId).digest("hex").slice(0, 16);
 }
 

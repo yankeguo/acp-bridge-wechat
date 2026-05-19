@@ -1,5 +1,5 @@
 /**
- * Configuration types and defaults for wechat-acp.
+ * Configuration types and defaults for acp-bridge-wechat.
  */
 
 import path from "node:path";
@@ -95,7 +95,7 @@ const INSTANCE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 /**
  * Validate an instance name. Names are used as a directory segment under
- * `~/.wechat-acp/instances/`, so we restrict them to a safe character set
+ * `~/.acp-bridge-wechat/instances/`, so we restrict them to a safe character set
  * to prevent path traversal (`..`, absolute paths) and platform-specific
  * issues with hidden / reserved names.
  */
@@ -110,7 +110,7 @@ export function validateInstanceName(instance: string): void {
 }
 
 export function defaultStorageDir(instance?: string): string {
-  const root = path.join(os.homedir(), ".wechat-acp");
+  const root = path.join(os.homedir(), ".acp-bridge-wechat");
   if (!instance) return root;
   validateInstanceName(instance);
   return path.join(root, "instances", instance);
@@ -139,7 +139,7 @@ export function defaultConfig(opts?: { instance?: string }): WeChatAcpConfig {
     },
     daemon: {
       enabled: false,
-      logFile: path.join(storageDir, "wechat-acp.log"),
+      logFile: path.join(storageDir, "acp-bridge-wechat.log"),
       pidFile: path.join(storageDir, "daemon.pid"),
     },
     storage: {

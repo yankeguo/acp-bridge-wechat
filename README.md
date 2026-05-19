@@ -2,13 +2,13 @@
 
 > **Hard fork notice:** This repository is a hard fork of [formulahendry/wechat-acp](https://github.com/formulahendry/wechat-acp)—a clean fork without commit history. We have decided to break away from upstream and evolve independently (**脱离上游，自主演进**).
 
-[![NPM Downloads](https://img.shields.io/npm/d18m/wechat-acp)](https://www.npmjs.com/package/wechat-acp)
+[![NPM Downloads](https://img.shields.io/npm/d18m/acp-bridge-wechat)](https://www.npmjs.com/package/acp-bridge-wechat)
 
 Bridge WeChat direct messages to any ACP-compatible AI agent.
 
-`wechat-acp` logs in with the WeChat iLink bot API, polls incoming 1:1 messages, forwards them to an ACP agent over stdio, and sends the agent reply back to WeChat.
+`acp-bridge-wechat` logs in with the WeChat iLink bot API, polls incoming 1:1 messages, forwards them to an ACP agent over stdio, and sends the agent reply back to WeChat.
 
-<img src="./resources/screenshot.jpg" alt="wechat-acp screenshot" width="400" />
+<img src="./resources/screenshot.jpg" alt="acp-bridge-wechat screenshot" width="400" />
 
 ## Features
 
@@ -31,20 +31,20 @@ Bridge WeChat direct messages to any ACP-compatible AI agent.
 Start with a built-in agent preset:
 
 ```bash
-npx wechat-acp --agent copilot
+npx acp-bridge-wechat --agent copilot
 ```
 
 Or use a raw custom command:
 
 ```bash
-npx wechat-acp --agent "npx my-agent --acp"
+npx acp-bridge-wechat --agent "npx my-agent --acp"
 ```
 
 On first run, the bridge will:
 
 1. Start WeChat QR login
 2. Render a QR code in the terminal
-3. Save the login token under `~/.wechat-acp`
+3. Save the login token under `~/.acp-bridge-wechat`
 4. Begin polling direct messages
 
 ## Built-in Agent Presets
@@ -52,7 +52,7 @@ On first run, the bridge will:
 List the bundled presets:
 
 ```bash
-npx wechat-acp agents
+npx acp-bridge-wechat agents
 ```
 
 Current presets:
@@ -69,10 +69,10 @@ These presets resolve to concrete `command + args` pairs internally, so users do
 ## CLI Usage
 
 ```text
-wechat-acp --agent <preset|command> [options]
-wechat-acp agents
-wechat-acp stop
-wechat-acp status
+acp-bridge-wechat --agent <preset|command> [options]
+acp-bridge-wechat agents
+acp-bridge-wechat stop
+acp-bridge-wechat status
 ```
 
 Options:
@@ -91,24 +91,24 @@ Options:
 Examples:
 
 ```bash
-npx wechat-acp --agent copilot
-npx wechat-acp --agent claude --cwd D:\code\project
-npx wechat-acp --agent "npx @github/copilot --acp"
-npx wechat-acp --agent gemini --daemon
+npx acp-bridge-wechat --agent copilot
+npx acp-bridge-wechat --agent claude --cwd D:\code\project
+npx acp-bridge-wechat --agent "npx @github/copilot --acp"
+npx acp-bridge-wechat --agent gemini --daemon
 ```
 
 ## Running multiple instances
 
-By default everything (saved login token, daemon pid/log, sync state, telemetry id) lives under `~/.wechat-acp/`, which means a single machine can only host one bridge at a time. Pass `--instance <name>` to namespace all of that under `~/.wechat-acp/instances/<name>/` and run several bridges side by side, each with its own WeChat account and project directory.
+By default everything (saved login token, daemon pid/log, sync state, telemetry id) lives under `~/.acp-bridge-wechat/`, which means a single machine can only host one bridge at a time. Pass `--instance <name>` to namespace all of that under `~/.acp-bridge-wechat/instances/<name>/` and run several bridges side by side, each with its own WeChat account and project directory.
 
 Typical setup: WeChat account 1 drives project A, WeChat account 2 drives project B.
 
 ```bash
 # Terminal 1: scan with WeChat account 1
-npx wechat-acp --instance projA --agent copilot --cwd D:\code\repo-a
+npx acp-bridge-wechat --instance projA --agent copilot --cwd D:\code\repo-a
 
 # Terminal 2: scan with WeChat account 2
-npx wechat-acp --instance projB --agent copilot --cwd D:\code\repo-b
+npx acp-bridge-wechat --instance projB --agent copilot --cwd D:\code\repo-b
 ```
 
 The first run of each instance prints its own QR code. Tokens are saved per instance, so subsequent runs reuse them independently.
@@ -116,11 +116,11 @@ The first run of each instance prints its own QR code. Tokens are saved per inst
 The `stop` and `status` subcommands also honor `--instance`:
 
 ```bash
-npx wechat-acp status --instance projA
-npx wechat-acp stop   --instance projB
+npx acp-bridge-wechat status --instance projA
+npx acp-bridge-wechat stop   --instance projB
 ```
 
-Without `--instance`, paths fall back to `~/.wechat-acp/` exactly as before, so existing installs are unaffected.
+Without `--instance`, paths fall back to `~/.acp-bridge-wechat/` exactly as before, so existing installs are unaffected.
 
 ## Configuration File
 
@@ -172,7 +172,7 @@ You can also override or add agent presets:
 By default, runtime files are stored under:
 
 ```text
-~/.wechat-acp
+~/.acp-bridge-wechat
 ```
 
 This directory is used for:
@@ -183,7 +183,7 @@ This directory is used for:
 - sync state
 - anonymous telemetry install id (`telemetry-id`, see Telemetry section)
 
-When `--instance <name>` is used, the same files live under `~/.wechat-acp/instances/<name>/` instead, fully isolated from other instances.
+When `--instance <name>` is used, the same files live under `~/.acp-bridge-wechat/instances/<name>/` instead, fully isolated from other instances.
 
 ## Current Limitations
 
@@ -205,7 +205,7 @@ npm run build
 Run the built CLI locally:
 
 ```bash
-node dist/bin/wechat-acp.js --help
+node dist/bin/acp-bridge-wechat.js --help
 ```
 
 Watch mode:
@@ -216,12 +216,12 @@ npm run dev
 
 ## Telemetry
 
-`wechat-acp` collects anonymous usage telemetry via Azure Application Insights to help understand which agent presets are used and to detect crashes.
+`acp-bridge-wechat` collects anonymous usage telemetry via Azure Application Insights to help understand which agent presets are used and to detect crashes.
 
-**To disable telemetry**, set the `WECHAT_ACP_TELEMETRY` environment variable to `0`, `false`, or `off` before running:
+**To disable telemetry**, set the `ACP_BRIDGE_WECHAT_TELEMETRY` environment variable to `0`, `false`, or `off` before running:
 
 ```bash
-WECHAT_ACP_TELEMETRY=0 npx wechat-acp --agent copilot
+ACP_BRIDGE_WECHAT_TELEMETRY=0 npx acp-bridge-wechat --agent copilot
 ```
 
 **What is collected** (9 event types only):
@@ -237,7 +237,7 @@ Plus exception reports for `monitor`, `prompt`, `reply`, `auth`, `agent_spawn`, 
 
 **What is never collected**: message bodies, filenames, voice transcripts, image URLs, login tokens, QR codes, raw agent command strings, environment variables, working directory paths, raw WeChat user IDs.
 
-User IDs are sha256-hashed with a per-install salt stored in `~/.wechat-acp/telemetry-id`. The salt is generated on first run and never leaves your machine. Delete the file to rotate it.
+User IDs are sha256-hashed with a per-install salt stored in `~/.acp-bridge-wechat/telemetry-id`. The salt is generated on first run and never leaves your machine. Delete the file to rotate it.
 
 ## License
 

@@ -1,5 +1,5 @@
 /**
- * wechat-acp — public API
+ * acp-bridge-wechat — public API
  */
 
 export { WeChatAcpBridge } from "./bridge.js";
