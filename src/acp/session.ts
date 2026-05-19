@@ -9,12 +9,7 @@ import type { ChildProcess } from "node:child_process";
 import type * as acp from "@agentclientprotocol/sdk";
 import { WeChatAcpClient } from "./client.js";
 import { spawnAgent, killAgent, type AgentProcessInfo } from "./agent-manager.js";
-import {
-  loadUserCwdStore,
-  resolveAgentDirectory,
-  saveUserCwdStore,
-  type UserCwdStore,
-} from "./user-cwd.js";
+import { resolveAgentDirectory } from "./user-cwd.js";
 
 export interface PendingMessage {
   prompt: acp.ContentBlock[];
@@ -43,8 +38,6 @@ export interface SessionManagerOpts {
   agentArgs: string[];
   agentCwd: string;
   agentEnv?: Record<string, string>;
-  /** Persist per-user agent cwd overrides under this directory. */
-  storageDir?: string;
   idleTimeoutMs: number;
   maxConcurrentUsers: number;
   showThoughts: boolean;
@@ -55,20 +48,18 @@ export interface SessionManagerOpts {
 
 export class SessionManager {
   private sessions = new Map<string, UserSession>();
-  private userCwdOverrides: UserCwdStore = {};
+  /** In-memory only; cleared when the bridge process restarts. */
+  private userCwdOverrides = new Map<string, string>();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private opts: SessionManagerOpts;
   private aborted = false;
 
   constructor(opts: SessionManagerOpts) {
     this.opts = opts;
-    if (opts.storageDir) {
-      this.userCwdOverrides = loadUserCwdStore(opts.storageDir);
-    }
   }
 
   getAgentCwd(userId: string): string {
-    return this.userCwdOverrides[userId] ?? this.opts.agentCwd;
+    return this.userCwdOverrides.get(userId) ?? this.opts.agentCwd;
   }
 
   start(): void {
@@ -190,10 +181,7 @@ export class SessionManager {
       this.opts.log(`[${userId}] Agent stopped for directory change`);
     }
 
-    this.userCwdOverrides[userId] = resolved.path;
-    if (this.opts.storageDir) {
-      saveUserCwdStore(this.opts.storageDir, this.userCwdOverrides);
-    }
+    this.userCwdOverrides.set(userId, resolved.path);
 
     this.opts.log(`[${userId}] Agent cwd set to ${resolved.path}`);
     return { ok: true, path: resolved.path, hadSession };

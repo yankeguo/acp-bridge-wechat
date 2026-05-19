@@ -45,22 +45,3 @@ export function resolveAgentDirectory(rawPath: string, baseCwd: string): Resolve
 
   return { ok: true, path: resolved };
 }
-
-export type UserCwdStore = Record<string, string>;
-
-export function loadUserCwdStore(storageDir: string): UserCwdStore {
-  const filePath = path.join(storageDir, "user-agent-cwd.json");
-  try {
-    if (!fs.existsSync(filePath)) return {};
-    const data = JSON.parse(fs.readFileSync(filePath, "utf-8")) as UserCwdStore;
-    return data && typeof data === "object" ? data : {};
-  } catch {
-    return {};
-  }
-}
-
-export function saveUserCwdStore(storageDir: string, store: UserCwdStore): void {
-  const filePath = path.join(storageDir, "user-agent-cwd.json");
-  fs.mkdirSync(storageDir, { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(store, null, 2), "utf-8");
-}
