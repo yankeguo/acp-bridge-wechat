@@ -1,8 +1,8 @@
-import fs from "node:fs";
+import { stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-export type ResolveDirectoryResult =
+export type ResolvePathResult =
   | { ok: true; path: string }
   | { ok: false; error: string };
 
@@ -17,14 +17,10 @@ export function expandHomeDir(input: string): string {
   return input;
 }
 
-/**
- * Resolve and validate a directory path for //cd.
- * Relative paths are resolved against `baseCwd` (bridge default agent cwd).
- */
-export function resolveAgentDirectory(rawPath: string, baseCwd: string): ResolveDirectoryResult {
+function resolvePath(rawPath: string, baseCwd: string): string | { ok: false; error: string } {
   const trimmed = rawPath.trim();
   if (!trimmed) {
-    return { ok: false, error: "目录路径不能为空" };
+    return { ok: false, error: "路径不能为空" };
   }
 
   const expanded = expandHomeDir(trimmed);
@@ -32,16 +28,63 @@ export function resolveAgentDirectory(rawPath: string, baseCwd: string): Resolve
     ? path.resolve(expanded)
     : path.resolve(baseCwd, expanded);
 
-  let stat: fs.Stats;
+  return resolved;
+}
+
+/**
+ * Resolve and validate a directory path for //cd.
+ * Relative paths are resolved against `baseCwd` (bridge default agent cwd).
+ */
+export async function resolveAgentDirectory(
+  rawPath: string,
+  baseCwd: string,
+): Promise<ResolvePathResult> {
+  const trimmed = rawPath.trim();
+  if (!trimmed) {
+    return { ok: false, error: "目录路径不能为空" };
+  }
+
+  const resolved = resolvePath(rawPath, baseCwd);
+  if (typeof resolved !== "string") {
+    return resolved;
+  }
+
   try {
-    stat = fs.statSync(resolved);
+    const fileStat = await stat(resolved);
+    if (!fileStat.isDirectory()) {
+      return { ok: false, error: `不是目录: ${resolved}` };
+    }
+    return { ok: true, path: resolved };
   } catch {
     return { ok: false, error: `目录不存在: ${resolved}` };
   }
+}
 
-  if (!stat.isDirectory()) {
-    return { ok: false, error: `不是目录: ${resolved}` };
+/**
+ * Resolve and validate a file path for //file.
+ * Relative paths are resolved against `baseCwd` (this user's effective agent cwd).
+ */
+export async function resolveAgentFile(
+  rawPath: string,
+  baseCwd: string,
+): Promise<ResolvePathResult> {
+  const trimmed = rawPath.trim();
+  if (!trimmed) {
+    return { ok: false, error: "文件路径不能为空" };
   }
 
-  return { ok: true, path: resolved };
+  const resolved = resolvePath(rawPath, baseCwd);
+  if (typeof resolved !== "string") {
+    return resolved;
+  }
+
+  try {
+    const fileStat = await stat(resolved);
+    if (!fileStat.isFile()) {
+      return { ok: false, error: `不是文件: ${resolved}` };
+    }
+    return { ok: true, path: resolved };
+  } catch {
+    return { ok: false, error: `文件不存在: ${resolved}` };
+  }
 }

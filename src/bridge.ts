@@ -6,6 +6,7 @@
  */
 
 import path from "node:path";
+import { resolveAgentFile } from "./acp/user-cwd.js";
 import { login, loadToken, type TokenData } from "./weixin/auth/login.js";
 import { startMonitor } from "./weixin/monitor/monitor.js";
 import { sendTextMessage, splitText } from "./weixin/send.js";
@@ -18,7 +19,12 @@ import { initWeixinLogger } from "./weixin/util/logger.js";
 import { assertSessionActive } from "./weixin/api/session-guard.js";
 import { restoreContextTokens, resolveContextToken } from "./weixin/storage/context-tokens.js";
 import { SessionManager } from "./acp/session.js";
-import { handleBridgeCommand, isBridgeCommandMessage } from "./bridge-commands.js";
+import {
+  handleBridgeCommand,
+  isBridgeCommandMessage,
+  type SendFileResult,
+} from "./bridge-commands.js";
+import { sendWeixinMediaFile } from "./weixin/messaging/send-media.js";
 import { weixinMessageToPrompt } from "./adapter/inbound.js";
 import { formatForWeChat } from "./adapter/outbound.js";
 import type { WeChatAcpConfig } from "./config.js";
@@ -187,9 +193,10 @@ export class WeChatAcpBridge {
 
     const textBody = bodyFromItemList(msg.item_list);
     if (isBridgeCommandMessage(textBody)) {
-      const result = await handleBridgeCommand(textBody, userId, {
+      const result = await handleBridgeCommand(textBody, userId, contextToken, {
         stopInteraction: (uid) => this.sessionManager!.stopInteraction(uid),
         changeDirectory: (uid, dir) => this.sessionManager!.changeWorkingDirectory(uid, dir),
+        sendFile: (uid, token, filePath) => this.sendFileToUser(uid, token, filePath),
       });
       if (result.handled) {
         await this.sendReply(userId, contextToken, result.reply);
@@ -206,6 +213,54 @@ export class WeChatAcpBridge {
     });
 
     await this.sessionManager!.enqueue(userId, { prompt, contextToken });
+  }
+
+  private async sendFileToUser(
+    userId: string,
+    contextToken: string,
+    rawPath: string,
+  ): Promise<SendFileResult> {
+    const baseCwd = this.sessionManager!.getAgentCwd(userId);
+    const resolved = await resolveAgentFile(rawPath, baseCwd);
+    if (!resolved.ok) {
+      return { ok: false, error: resolved.error };
+    }
+
+    try {
+      assertSessionActive(this.tokenData!.accountId);
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+
+    const resolvedToken = resolveContextToken(
+      this.config.storage.dir,
+      userId,
+      contextToken,
+    );
+    if (!resolvedToken) {
+      return { ok: false, error: "无法发送：缺少 context_token" };
+    }
+
+    try {
+      await sendWeixinMediaFile({
+        filePath: resolved.path,
+        to: userId,
+        text: "",
+        opts: {
+          baseUrl: this.tokenData!.baseUrl,
+          token: this.tokenData!.token,
+          contextToken: resolvedToken,
+        },
+        cdnBaseUrl: this.config.wechat.cdnBaseUrl,
+      });
+      const fileName = path.basename(resolved.path);
+      this.log(`Sent file to ${userId}: ${resolved.path}`);
+      await this.cancelTypingIndicator(userId, resolvedToken).catch(() => {});
+      return { ok: true, path: resolved.path, fileName };
+    } catch (err) {
+      this.log(`Failed to send file to ${userId}: ${String(err)}`);
+      return { ok: false, error: `发送失败: ${String(err)}` };
+    }
   }
 
   private async sendReply(userId: string, contextToken: string, text: string): Promise<void> {

@@ -153,7 +153,7 @@ You can also override or add agent presets:
 
 The WeChat iLink client in `src/weixin/` is vendored from [@tencent-weixin/openclaw-weixin](https://www.npmjs.com/package/@tencent-weixin/openclaw-weixin) (protocol, login, CDN media, lifecycle). OpenClaw-specific integration (slash commands, debug tracing, pairing) is not included.
 
-Outbound file upload via CDN (`src/weixin/cdn/`) is retained for a planned feature to send images/files to users.
+Outbound file upload via CDN (`src/weixin/cdn/`) is used by the `//file` bridge command to send files to users.
 
 ### Bridge commands (`//`)
 
@@ -163,8 +163,11 @@ Bridge-owned commands use a **double slash** prefix so they are not confused wit
 |---------|-------------|
 | `//stop` | Cancel the in-flight ACP reply and clear queued messages for this user |
 | `//cd <dir>` | Switch this user's agent working directory and restart ACP (next message spawns a new agent process) |
+| `//file <path>` | Send a local file to this user via WeChat (images/videos/files; path relative to this user's agent cwd) |
 
 `//cd` overrides are **in-memory only** for the current bridge process. After a restart, each user's agent cwd comes from `--cwd`, config `agent.cwd`, or the bridge process working directory (whichever applies at startup)—not from a previous `//cd`.
+
+`//file` paths support `~`, absolute paths, and paths relative to the user's effective agent cwd (including any in-memory `//cd` override).
 
 ## Runtime Behavior
 
