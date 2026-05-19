@@ -80,11 +80,6 @@ export interface WeChatAcpConfig {
     idleTimeoutMs: number;
     maxConcurrentUsers: number;
   };
-  daemon: {
-    enabled: boolean;
-    logFile: string;
-    pidFile: string;
-  };
   storage: {
     dir: string;
     instance?: string;
@@ -136,11 +131,6 @@ export function defaultConfig(opts?: { instance?: string }): WeChatAcpConfig {
     session: {
       idleTimeoutMs: 1440 * 60_000, // 24 hours
       maxConcurrentUsers: 10,
-    },
-    daemon: {
-      enabled: false,
-      logFile: path.join(storageDir, "acp-bridge-wechat.log"),
-      pidFile: path.join(storageDir, "daemon.pid"),
     },
     storage: {
       dir: storageDir,
