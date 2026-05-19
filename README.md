@@ -182,15 +182,16 @@ Bridge-owned commands use a **double slash** prefix so they are not confused wit
 By default, runtime files are stored under:
 
 ```text
-~/.acp-bridge-wechat
+~/.acp-bridge-wechat/
+├── token.json              # WeChat bot login token
+├── sync-buf.json           # getUpdates long-poll cursor
+├── context-tokens.json     # per-user reply context (survives restarts)
+└── media/                  # decrypted inbound attachments (temp)
 ```
 
-This directory is used for:
+When `--instance <name>` is used, the same layout lives under `~/.acp-bridge-wechat/instances/<name>/` instead, fully isolated from other instances.
 
-- saved login token
-- sync state
-
-When `--instance <name>` is used, the same files live under `~/.acp-bridge-wechat/instances/<name>/` instead, fully isolated from other instances.
+All disk I/O uses async `fs/promises` (no blocking sync calls in the runtime path).
 
 ## Current Limitations
 
@@ -199,6 +200,18 @@ When `--instance <name>` is used, the same files live under `~/.acp-bridge-wecha
 - Permission requests are auto-approved
 - Agent communication is subprocess-only over stdio
 - Some preset agents may require separate authentication before they can respond successfully
+
+## Project layout
+
+| Path | Role |
+|------|------|
+| `bin/acp-bridge-wechat.ts` | CLI entry |
+| `src/bridge.ts` | Orchestrator: WeChat polling ↔ ACP sessions |
+| `src/bridge-commands.ts` | Bridge-owned `//` commands (`//stop`, `//cd`, `//file`) |
+| `src/acp/` | ACP client, per-user session manager, path helpers |
+| `src/adapter/` | WeChat ↔ ACP message conversion |
+| `src/weixin/` | Vendored iLink protocol (API, login, CDN, monitor) |
+| `src/util/fs-json.ts` | Shared async JSON file helpers |
 
 ## Development
 

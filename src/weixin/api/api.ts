@@ -3,10 +3,8 @@
  */
 
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
+import { getChannelVersion, getIlinkAppId } from "./package-info.js";
 import { loadConfigBotAgent, loadConfigRouteTag } from "./runtime-config.js";
 import { logger } from "../util/logger.js";
 import { redactBody, redactUrl } from "../util/redact.js";
@@ -24,6 +22,8 @@ import type {
   GetConfigResp,
 } from "./types.js";
 
+export { initPackageInfo, readPackageJsonFromDir } from "./package-info.js";
+
 export type { GetConfigResp, GetUpdatesResp, SendMessageReq, SendTypingReq } from "./types.js";
 
 export type WeixinApiOptions = {
@@ -33,51 +33,6 @@ export type WeixinApiOptions = {
   longPollTimeoutMs?: number;
 };
 
-interface PackageJson {
-  name?: string;
-  version?: string;
-  ilink_appid?: string;
-}
-
-function isOwnPackageJson(parsed: PackageJson): boolean {
-  if (parsed.ilink_appid !== undefined) return true;
-  const name = parsed.name ?? "";
-  return name.includes("openclaw-weixin") || name === "acp-bridge-wechat";
-}
-
-export function readPackageJsonFromDir(startDir: string): PackageJson {
-  try {
-    let dir = startDir;
-    const { root } = path.parse(dir);
-    while (dir && dir !== root) {
-      const candidate = path.join(dir, "package.json");
-      if (fs.existsSync(candidate)) {
-        try {
-          const parsed = JSON.parse(fs.readFileSync(candidate, "utf-8")) as PackageJson;
-          if (isOwnPackageJson(parsed)) {
-            return parsed;
-          }
-        } catch {
-          // keep walking
-        }
-      }
-      dir = path.dirname(dir);
-    }
-  } catch {
-    // fall through
-  }
-  return {};
-}
-
-function readPackageJson(): PackageJson {
-  return readPackageJsonFromDir(path.dirname(fileURLToPath(import.meta.url)));
-}
-
-const pkg = readPackageJson();
-
-const CHANNEL_VERSION = pkg.version ?? "unknown";
-const ILINK_APP_ID: string = pkg.ilink_appid ?? "";
-
 function buildClientVersion(version: string): number {
   const parts = version.split(".").map((p) => parseInt(p, 10));
   const major = parts[0] ?? 0;
@@ -86,7 +41,9 @@ function buildClientVersion(version: string): number {
   return ((major & 0xff) << 16) | ((minor & 0xff) << 8) | (patch & 0xff);
 }
 
-const ILINK_APP_CLIENT_VERSION: number = buildClientVersion(pkg.version ?? "0.0.0");
+function getIlinkAppClientVersion(): number {
+  return buildClientVersion(getChannelVersion());
+}
 
 const DEFAULT_BOT_AGENT = "acp-bridge-wechat";
 const BOT_AGENT_MAX_LEN = 256;
@@ -157,7 +114,7 @@ export function sanitizeBotAgent(raw: string | undefined): string {
 
 export function buildBaseInfo(): BaseInfo {
   return {
-    channel_version: CHANNEL_VERSION,
+    channel_version: getChannelVersion(),
     bot_agent: sanitizeBotAgent(loadConfigBotAgent()),
   };
 }
@@ -177,8 +134,8 @@ function randomWechatUin(): string {
 
 function buildCommonHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
-    "iLink-App-Id": ILINK_APP_ID,
-    "iLink-App-ClientVersion": String(ILINK_APP_CLIENT_VERSION),
+    "iLink-App-Id": getIlinkAppId(),
+    "iLink-App-ClientVersion": String(getIlinkAppClientVersion()),
   };
   const routeTag = loadConfigRouteTag();
   if (routeTag) {

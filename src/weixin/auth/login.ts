@@ -22,7 +22,7 @@ export async function login(params: {
 }): Promise<TokenData> {
   const { baseUrl, storageDir, log, renderQrUrl, verbose } = params;
   const botType = params.botType ?? DEFAULT_ILINK_BOT_TYPE;
-  const existing = loadToken(storageDir);
+  const existing = await loadToken(storageDir);
 
   log("Starting WeChat QR login...");
 
@@ -73,7 +73,7 @@ export async function login(params: {
     savedAt: new Date().toISOString(),
   };
 
-  saveToken(storageDir, tokenData);
+  await saveToken(storageDir, tokenData);
   log(`Login successful! Bot ID: ${tokenData.accountId}`);
   log(`Token saved to ${storageDir}/token.json`);
   return tokenData;

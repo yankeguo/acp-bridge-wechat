@@ -1,6 +1,7 @@
-import fs from "node:fs";
 import path from "node:path";
+import { writeFile } from "node:fs/promises";
 
+import { ensureDir } from "../../util/fs-json.js";
 import { getExtensionFromMime } from "./mime.js";
 import { tempFileName } from "../util/random.js";
 
@@ -19,7 +20,7 @@ export function createSaveMediaFn(mediaRootDir: string): SaveMediaFn {
     }
 
     const dir = path.join(mediaRootDir, subdir);
-    fs.mkdirSync(dir, { recursive: true });
+    await ensureDir(dir);
 
     const ext = originalFilename
       ? path.extname(originalFilename)
@@ -31,7 +32,7 @@ export function createSaveMediaFn(mediaRootDir: string): SaveMediaFn {
       : tempFileName("media", ext.startsWith(".") ? ext : `.${ext}`);
     const filePath = path.join(dir, baseName);
 
-    await fs.promises.writeFile(filePath, buffer);
+    await writeFile(filePath, buffer);
     return { path: filePath };
   };
 }

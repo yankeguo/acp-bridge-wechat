@@ -2,7 +2,7 @@
  * Inbound adapter: convert WeChat messages to ACP ContentBlock[].
  */
 
-import fs from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type * as acp from "@agentclientprotocol/sdk";
 import type { WeixinMessage } from "../weixin/api/types.js";
@@ -72,7 +72,7 @@ async function mediaOptsToContentBlock(
 ): Promise<acp.ContentBlock | null> {
   if (media.decryptedPicPath) {
     log(`Downloaded image: ${media.decryptedPicPath}`);
-    const buffer = await fs.promises.readFile(media.decryptedPicPath);
+    const buffer = await readFile(media.decryptedPicPath);
     return {
       type: "image",
       data: buffer.toString("base64"),
@@ -83,7 +83,7 @@ async function mediaOptsToContentBlock(
   if (media.decryptedFilePath) {
     const fileName = path.basename(media.decryptedFilePath);
     log(`Downloaded file: ${fileName}`);
-    const buffer = await fs.promises.readFile(media.decryptedFilePath);
+    const buffer = await readFile(media.decryptedFilePath);
     if (isTextFile(fileName)) {
       return {
         type: "resource",

@@ -67,7 +67,7 @@ async function fetchQRCode(
   storageDir: string,
 ): Promise<QRCodeResponse> {
   logger.info(`NewFetching QR code from: ${apiBaseUrl} bot_type=${botType}`);
-  const localTokenList = listLocalBotTokens(storageDir);
+  const localTokenList = await listLocalBotTokens(storageDir);
   logger.info(`newfetchQRCode: local_token_list count=${localTokenList.length}`);
   const rawText = await apiPostFetch({
     baseUrl: apiBaseUrl,
