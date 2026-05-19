@@ -162,6 +162,9 @@ Bridge-owned commands use a **double slash** prefix so they are not confused wit
 | Command | Description |
 |---------|-------------|
 | `//stop` | Cancel the in-flight ACP reply and clear queued messages for this user |
+| `//cd <dir>` | Switch this user's agent working directory and restart ACP (next message spawns a new agent process) |
+
+Per-user cwd overrides are saved under `{storage}/user-agent-cwd.json` (respects `--instance`).
 
 ## Runtime Behavior
 

@@ -101,6 +101,7 @@ export class WeChatAcpBridge {
       agentArgs: this.config.agent.args,
       agentCwd: this.config.agent.cwd,
       agentEnv: this.config.agent.env,
+      storageDir: this.config.storage.dir,
       idleTimeoutMs: this.config.session.idleTimeoutMs,
       maxConcurrentUsers: this.config.session.maxConcurrentUsers,
       showThoughts: this.config.agent.showThoughts,
@@ -189,6 +190,7 @@ export class WeChatAcpBridge {
     if (isBridgeCommandMessage(textBody)) {
       const result = await handleBridgeCommand(textBody, userId, {
         stopInteraction: (uid) => this.sessionManager!.stopInteraction(uid),
+        changeDirectory: (uid, dir) => this.sessionManager!.changeWorkingDirectory(uid, dir),
       });
       if (result.handled) {
         await this.sendReply(userId, contextToken, result.reply);
