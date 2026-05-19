@@ -18,7 +18,9 @@ import { initWeixinLogger } from "./weixin/util/logger.js";
 import { setDebugModeStorageDir } from "./weixin/messaging/debug-mode.js";
 import { handleSlashCommand } from "./weixin/messaging/slash-commands.js";
 import { extractTextBody } from "./weixin/messaging/inbound.js";
+import { assertSessionActive } from "./weixin/api/session-guard.js";
 import { restoreContextTokens, setContextToken } from "./weixin/storage/context-tokens.js";
+import { isDebugMode } from "./weixin/messaging/debug-mode.js";
 import { SessionManager } from "./acp/session.js";
 import { weixinMessageToPrompt } from "./adapter/inbound.js";
 import { formatForWeChat } from "./adapter/outbound.js";
@@ -172,6 +174,13 @@ export class WeChatAcpBridge {
     userId: string,
     contextToken: string,
   ): Promise<void> {
+    try {
+      assertSessionActive(this.tokenData!.accountId);
+    } catch (err) {
+      this.log(`Skipping message during session pause: ${String(err)}`);
+      return;
+    }
+
     const textBody = extractTextBody(msg);
     if (textBody.startsWith("/")) {
       const slash = await handleSlashCommand(
@@ -205,7 +214,14 @@ export class WeChatAcpBridge {
   }
 
   private async sendReply(userId: string, contextToken: string, text: string): Promise<void> {
-    const formatted = formatForWeChat(text);
+    assertSessionActive(this.tokenData!.accountId);
+
+    let outbound = text;
+    if (isDebugMode(this.tokenData!.accountId)) {
+      outbound += `\n\n⏱ [debug] reply delivered at ${new Date().toISOString()}`;
+    }
+
+    const formatted = formatForWeChat(outbound);
     const segments = splitText(formatted, TEXT_CHUNK_LIMIT);
 
     for (const segment of segments) {
@@ -220,6 +236,11 @@ export class WeChatAcpBridge {
   }
 
   private async cancelTypingIndicator(userId: string, contextToken: string): Promise<void> {
+    try {
+      assertSessionActive(this.tokenData!.accountId);
+    } catch {
+      return;
+    }
     const ticket = await this.resolveTypingTicket(userId, contextToken);
     if (!ticket) return;
 
@@ -236,6 +257,7 @@ export class WeChatAcpBridge {
 
   private async sendTypingIndicator(userId: string, contextToken: string): Promise<void> {
     try {
+      assertSessionActive(this.tokenData!.accountId);
       const ticket = await this.resolveTypingTicket(userId, contextToken);
       if (!ticket) return;
 

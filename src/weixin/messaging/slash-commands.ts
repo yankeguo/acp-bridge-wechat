@@ -7,7 +7,7 @@
  */
 import { logger } from "../util/logger.js";
 
-import { toggleDebugMode, isDebugMode } from "./debug-mode.js";
+import { toggleDebugMode } from "./debug-mode.js";
 import { sendTextMessage } from "../send.js";
 
 export interface SlashCommandResult {

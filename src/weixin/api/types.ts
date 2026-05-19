@@ -8,8 +8,8 @@ export interface BaseInfo {
   channel_version?: string;
   /**
    * Self-declared identity of the upstream bot/app, analogous to HTTP
-   * `User-Agent`. Filled from `channels.openclaw-weixin.botAgent` in
-   * openclaw.json; defaults to `"OpenClaw"` when unset.
+   * `User-Agent`. Set via `wechat.botAgent` in config or `--bot-agent` CLI flag;
+   * defaults to `"acp-bridge-wechat"` when unset.
    *
    * Format: UA-style `Name/Version` tokens, optionally followed by
    * `(comment)`, multiple tokens space-separated. ASCII only, total

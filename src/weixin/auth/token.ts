@@ -46,14 +46,26 @@ export function listLocalBotTokens(primaryStorageDir: string): string[] {
     }
   };
 
-  add(primaryStorageDir);
+  const dirsToScan = new Set<string>([primaryStorageDir]);
 
-  const instancesRoot = path.join(path.dirname(primaryStorageDir), "instances");
-  if (fs.existsSync(instancesRoot)) {
-    for (const name of fs.readdirSync(instancesRoot)) {
-      if (tokens.length >= 10) break;
-      add(path.join(instancesRoot, name));
+  const nestedInstances = path.join(primaryStorageDir, "instances");
+  if (fs.existsSync(nestedInstances)) {
+    for (const name of fs.readdirSync(nestedInstances)) {
+      dirsToScan.add(path.join(nestedInstances, name));
     }
+  }
+
+  const parentDir = path.dirname(primaryStorageDir);
+  const siblingInstances = path.join(parentDir, "instances");
+  if (siblingInstances !== nestedInstances && fs.existsSync(siblingInstances)) {
+    for (const name of fs.readdirSync(siblingInstances)) {
+      dirsToScan.add(path.join(siblingInstances, name));
+    }
+  }
+
+  for (const dir of dirsToScan) {
+    if (tokens.length >= 10) break;
+    add(dir);
   }
 
   return tokens.slice(0, 10);
