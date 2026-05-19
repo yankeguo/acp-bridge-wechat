@@ -18,9 +18,11 @@ import { initWeixinLogger } from "./weixin/util/logger.js";
 import { assertSessionActive } from "./weixin/api/session-guard.js";
 import { restoreContextTokens, resolveContextToken } from "./weixin/storage/context-tokens.js";
 import { SessionManager } from "./acp/session.js";
+import { handleBridgeCommand, isBridgeCommandMessage } from "./bridge-commands.js";
 import { weixinMessageToPrompt } from "./adapter/inbound.js";
 import { formatForWeChat } from "./adapter/outbound.js";
 import type { WeChatAcpConfig } from "./config.js";
+import { bodyFromItemList } from "./weixin/messaging/inbound.js";
 
 const TEXT_CHUNK_LIMIT = 4000;
 
@@ -180,6 +182,18 @@ export class WeChatAcpBridge {
       assertSessionActive(this.tokenData!.accountId);
     } catch (err) {
       this.log(`Skipping message during session pause: ${String(err)}`);
+      return;
+    }
+
+    const textBody = bodyFromItemList(msg.item_list);
+    if (isBridgeCommandMessage(textBody)) {
+      const result = await handleBridgeCommand(textBody, userId, {
+        stopInteraction: (uid) => this.sessionManager!.stopInteraction(uid),
+      });
+      if (result.handled) {
+        await this.sendReply(userId, contextToken, result.reply);
+        await this.cancelTypingIndicator(userId, contextToken).catch(() => {});
+      }
       return;
     }
 

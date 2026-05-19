@@ -155,6 +155,14 @@ The WeChat iLink client in `src/weixin/` is vendored from [@tencent-weixin/openc
 
 Outbound file upload via CDN (`src/weixin/cdn/`) is retained for a planned feature to send images/files to users.
 
+### Bridge commands (`//`)
+
+Bridge-owned commands use a **double slash** prefix so they are not confused with the ACP agent's `/` commands (which are forwarded as normal user messages).
+
+| Command | Description |
+|---------|-------------|
+| `//stop` | Cancel the in-flight ACP reply and clear queued messages for this user |
+
 ## Runtime Behavior
 
 - Each WeChat user gets a dedicated ACP session and subprocess.
