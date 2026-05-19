@@ -10,7 +10,7 @@ import { resolveAgentFile } from "./acp/user-cwd.js";
 import { login, loadToken, type TokenData } from "./weixin/auth/login.js";
 import { startMonitor } from "./weixin/monitor/monitor.js";
 import { sendTextMessage, splitText } from "./weixin/send.js";
-import { sendTyping, notifyStart, notifyStop } from "./weixin/api/api.js";
+import { initPackageInfo, sendTyping, notifyStart, notifyStop } from "./weixin/api/api.js";
 import { TypingStatus, MessageType } from "./weixin/api/types.js";
 import type { WeixinMessage } from "./weixin/api/types.js";
 import { WeixinConfigManager } from "./weixin/api/config-cache.js";
@@ -63,10 +63,11 @@ export class WeChatAcpBridge {
   }): Promise<void> {
     const { forceLogin, renderQrUrl } = opts ?? {};
 
-    restoreContextTokens(this.config.storage.dir);
+    await initPackageInfo();
+    await restoreContextTokens(this.config.storage.dir);
 
     if (!forceLogin) {
-      this.tokenData = loadToken(this.config.storage.dir);
+      this.tokenData = await loadToken(this.config.storage.dir);
     }
 
     if (!this.tokenData) {
@@ -152,13 +153,23 @@ export class WeChatAcpBridge {
   }
 
   private handleMessage(msg: WeixinMessage, typingTicket: string): void {
+    void this.dispatchInboundMessage(msg, typingTicket).catch((err) => {
+      const userId = msg.from_user_id ?? "unknown";
+      this.log(`Failed to process message from ${userId}: ${String(err)}`);
+    });
+  }
+
+  private async dispatchInboundMessage(
+    msg: WeixinMessage,
+    typingTicket: string,
+  ): Promise<void> {
     if (msg.message_type !== MessageType.USER) return;
     if (msg.group_id) return;
 
     const userId = msg.from_user_id;
     if (!userId) return;
 
-    const contextToken = resolveContextToken(
+    const contextToken = await resolveContextToken(
       this.config.storage.dir,
       userId,
       msg.context_token,
@@ -173,10 +184,7 @@ export class WeChatAcpBridge {
     }
 
     this.log(`Message from ${userId}: ${this.previewMessage(msg)}`);
-
-    this.processMessage(msg, userId, contextToken).catch((err) => {
-      this.log(`Failed to process message from ${userId}: ${String(err)}`);
-    });
+    await this.processMessage(msg, userId, contextToken);
   }
 
   private async processMessage(
@@ -232,7 +240,7 @@ export class WeChatAcpBridge {
       return { ok: false, error: String(err) };
     }
 
-    const resolvedToken = resolveContextToken(
+    const resolvedToken = await resolveContextToken(
       this.config.storage.dir,
       userId,
       contextToken,
@@ -266,7 +274,7 @@ export class WeChatAcpBridge {
   private async sendReply(userId: string, contextToken: string, text: string): Promise<void> {
     assertSessionActive(this.tokenData!.accountId);
 
-    const resolvedToken = resolveContextToken(
+    const resolvedToken = await resolveContextToken(
       this.config.storage.dir,
       userId,
       contextToken,
@@ -313,7 +321,7 @@ export class WeChatAcpBridge {
   private async sendTypingIndicator(userId: string, contextToken: string): Promise<void> {
     try {
       assertSessionActive(this.tokenData!.accountId);
-      const resolvedToken = resolveContextToken(
+      const resolvedToken = await resolveContextToken(
         this.config.storage.dir,
         userId,
         contextToken,

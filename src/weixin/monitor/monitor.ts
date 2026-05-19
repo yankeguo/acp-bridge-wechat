@@ -52,7 +52,7 @@ export async function startMonitor(opts: MonitorOpts): Promise<void> {
   const { baseUrl, token, storageDir, abortSignal, log, onMessage, configManager } = opts;
   const accountId = opts.accountId ?? "default";
 
-  let getUpdatesBuf = loadGetUpdatesBuf(storageDir);
+  let getUpdatesBuf = await loadGetUpdatesBuf(storageDir);
   if (getUpdatesBuf) {
     log(`Resuming from previous sync buf (${getUpdatesBuf.length} bytes)`);
   } else {
@@ -112,7 +112,7 @@ export async function startMonitor(opts: MonitorOpts): Promise<void> {
       consecutiveFailures = 0;
 
       if (resp.get_updates_buf != null && resp.get_updates_buf !== "") {
-        saveGetUpdatesBuf(storageDir, resp.get_updates_buf);
+        await saveGetUpdatesBuf(storageDir, resp.get_updates_buf);
         getUpdatesBuf = resp.get_updates_buf;
       }
 

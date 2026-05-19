@@ -1,11 +1,14 @@
-import fs from "node:fs";
 import path from "node:path";
+
+import { pathExists, readJsonFile, writeJsonFile } from "../../util/fs-json.js";
 
 /**
  * Persist context_token per user so replies work across bridge restarts.
  */
 
 const contextTokenStore = new Map<string, string>();
+
+const persistChains = new Map<string, Promise<void>>();
 
 function contextTokenKey(storageDir: string, userId: string): string {
   return `${storageDir}:${userId}`;
@@ -15,7 +18,7 @@ function contextTokenFilePath(storageDir: string): string {
   return path.join(storageDir, "context-tokens.json");
 }
 
-function persistContextTokens(storageDir: string): void {
+async function persistContextTokens(storageDir: string): Promise<void> {
   const prefix = `${storageDir}:`;
   const tokens: Record<string, string> = {};
   for (const [k, v] of contextTokenStore) {
@@ -25,33 +28,44 @@ function persistContextTokens(storageDir: string): void {
   }
   const filePath = contextTokenFilePath(storageDir);
   try {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(tokens, null, 0), "utf-8");
+    await writeJsonFile(filePath, tokens);
   } catch {
     // best effort
   }
 }
 
-export function restoreContextTokens(storageDir: string): void {
+function schedulePersistContextTokens(storageDir: string): Promise<void> {
+  const prev = persistChains.get(storageDir) ?? Promise.resolve();
+  const next = prev
+    .then(() => persistContextTokens(storageDir))
+    .catch(() => {});
+  persistChains.set(storageDir, next);
+  return next;
+}
+
+export async function restoreContextTokens(storageDir: string): Promise<void> {
   const filePath = contextTokenFilePath(storageDir);
-  try {
-    if (!fs.existsSync(filePath)) return;
-    const tokens = JSON.parse(fs.readFileSync(filePath, "utf-8")) as Record<string, string>;
-    for (const [userId, token] of Object.entries(tokens)) {
-      if (typeof token === "string" && token) {
-        contextTokenStore.set(contextTokenKey(storageDir, userId), token);
-      }
+  if (!(await pathExists(filePath))) return;
+
+  const tokens = await readJsonFile<Record<string, string>>(filePath);
+  if (!tokens) return;
+
+  for (const [userId, token] of Object.entries(tokens)) {
+    if (typeof token === "string" && token) {
+      contextTokenStore.set(contextTokenKey(storageDir, userId), token);
     }
-  } catch {
-    // ignore
   }
 }
 
-export function setContextToken(storageDir: string, userId: string, token: string): void {
+export async function setContextToken(
+  storageDir: string,
+  userId: string,
+  token: string,
+): Promise<void> {
   const trimmed = token.trim();
   if (!trimmed) return;
   contextTokenStore.set(contextTokenKey(storageDir, userId), trimmed);
-  persistContextTokens(storageDir);
+  await schedulePersistContextTokens(storageDir);
 }
 
 export function getContextToken(storageDir: string, userId: string): string | undefined {
@@ -62,14 +76,14 @@ export function getContextToken(storageDir: string, userId: string): string | un
  * Prefer the token from the current message; fall back to the last persisted token
  * for this user (survives restarts and messages missing context_token).
  */
-export function resolveContextToken(
+export async function resolveContextToken(
   storageDir: string,
   userId: string,
   incoming?: string,
-): string | undefined {
+): Promise<string | undefined> {
   const trimmed = incoming?.trim();
   if (trimmed) {
-    setContextToken(storageDir, userId, trimmed);
+    await setContextToken(storageDir, userId, trimmed);
     return trimmed;
   }
   return getContextToken(storageDir, userId);

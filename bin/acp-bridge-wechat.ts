@@ -9,7 +9,7 @@
  *   acp-bridge-wechat --agent "npx tsx ./agent.ts" --login
  */
 
-import fs from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import qrcodeTerminal from "qrcode-terminal";
 import { WeChatAcpBridge } from "../src/bridge.js";
@@ -136,8 +136,8 @@ function parseArgs(argv: string[]): {
   return result;
 }
 
-function loadConfigFile(filePath: string): Partial<WeChatAcpConfig> {
-  const content = fs.readFileSync(filePath, "utf-8");
+async function loadConfigFile(filePath: string): Promise<Partial<WeChatAcpConfig>> {
+  const content = await readFile(filePath, "utf-8");
   return JSON.parse(content) as Partial<WeChatAcpConfig>;
 }
 
@@ -179,7 +179,7 @@ async function main(): Promise<void> {
 
   // Load config file if specified
   if (args.configFile) {
-    const fileConfig = loadConfigFile(args.configFile);
+    const fileConfig = await loadConfigFile(args.configFile);
     Object.assign(config.wechat, fileConfig.wechat ?? {});
     Object.assign(config.agent, fileConfig.agent ?? {});
     Object.assign(config.agents, fileConfig.agents ?? {});

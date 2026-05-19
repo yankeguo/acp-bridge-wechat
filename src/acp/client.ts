@@ -6,7 +6,7 @@
  * access for the agent.
  */
 
-import fs from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import type * as acp from "@agentclientprotocol/sdk";
 
 export interface WeChatAcpClientOpts {
@@ -120,7 +120,7 @@ export class WeChatAcpClient implements acp.Client {
 
   async readTextFile(params: acp.ReadTextFileRequest): Promise<acp.ReadTextFileResponse> {
     try {
-      const content = await fs.promises.readFile(params.path, "utf-8");
+      const content = await readFile(params.path, "utf-8");
       return { content };
     } catch (err) {
       throw new Error(`Failed to read file ${params.path}: ${String(err)}`);
@@ -129,7 +129,7 @@ export class WeChatAcpClient implements acp.Client {
 
   async writeTextFile(params: acp.WriteTextFileRequest): Promise<acp.WriteTextFileResponse> {
     try {
-      await fs.promises.writeFile(params.path, params.content, "utf-8");
+      await writeFile(params.path, params.content, "utf-8");
       return {};
     } catch (err) {
       throw new Error(`Failed to write file ${params.path}: ${String(err)}`);
