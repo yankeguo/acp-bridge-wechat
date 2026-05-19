@@ -6,9 +6,14 @@ import type { ChangeDirectoryResult } from "./acp/session.js";
 
 export type StopInteractionResult = "no_session" | "idle" | "stopped";
 
+export type SendFileResult =
+  | { ok: true; path: string; fileName: string }
+  | { ok: false; error: string };
+
 export type BridgeCommandDeps = {
   stopInteraction: (userId: string) => Promise<StopInteractionResult>;
   changeDirectory: (userId: string, rawPath: string) => Promise<ChangeDirectoryResult>;
+  sendFile: (userId: string, contextToken: string, rawPath: string) => Promise<SendFileResult>;
 };
 
 export type BridgeCommandHandleResult =
@@ -48,6 +53,13 @@ function replyForCd(result: ChangeDirectoryResult): string {
   return `工作目录已切换为:\n${result.path}\n\n${restarted}`;
 }
 
+function replyForFile(result: SendFileResult): string {
+  if (!result.ok) {
+    return result.error;
+  }
+  return `已发送文件: ${result.fileName}`;
+}
+
 /**
  * Returns true when the message should be handled as a bridge command (`//...`).
  */
@@ -61,6 +73,7 @@ export function isBridgeCommandMessage(text: string): boolean {
 export async function handleBridgeCommand(
   text: string,
   userId: string,
+  contextToken: string,
   deps: BridgeCommandDeps,
 ): Promise<BridgeCommandHandleResult> {
   const { command, args } = parseCommandLine(text);
@@ -77,10 +90,20 @@ export async function handleBridgeCommand(
       const result = await deps.changeDirectory(userId, args);
       return { handled: true, reply: replyForCd(result) };
     }
+    case "//file": {
+      if (!args) {
+        return {
+          handled: true,
+          reply: "用法: //file <文件路径>\n例如: //file ./output/report.pdf 或 //file /tmp/data.json",
+        };
+      }
+      const result = await deps.sendFile(userId, contextToken, args);
+      return { handled: true, reply: replyForFile(result) };
+    }
     default:
       return {
         handled: true,
-        reply: `未知 bridge 命令: ${command}\n当前支持: //stop, //cd`,
+        reply: `未知 bridge 命令: ${command}\n当前支持: //stop, //cd, //file`,
       };
   }
 }
