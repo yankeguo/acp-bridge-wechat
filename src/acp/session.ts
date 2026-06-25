@@ -48,6 +48,13 @@ export interface SessionManagerOpts {
 
 export class SessionManager {
   private sessions = new Map<string, UserSession>();
+  /**
+   * In-flight session creation per user. Guards against the spawn storm: when a
+   * session is torn down (e.g. after //cd) and the user sends several messages
+   * before the new agent finishes booting, all those enqueues coalesce onto a
+   * single createSession instead of each spawning its own agent subprocess.
+   */
+  private pendingSessions = new Map<string, Promise<UserSession>>();
   /** In-memory only; cleared when the bridge process restarts. */
   private userCwdOverrides = new Map<string, string>();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
@@ -80,20 +87,13 @@ export class SessionManager {
       killAgent(session.agentInfo.process);
     }
     this.sessions.clear();
+    // In-flight spawns will see `this.aborted` and kill themselves on resolve;
+    // drop the registry so nothing else awaits them.
+    this.pendingSessions.clear();
   }
 
   async enqueue(userId: string, message: PendingMessage): Promise<void> {
-    let session = this.sessions.get(userId);
-
-    if (!session) {
-      if (this.sessions.size >= this.opts.maxConcurrentUsers) {
-        // Evict oldest idle session
-        this.evictOldest();
-      }
-
-      session = await this.createSession(userId, message.contextToken);
-      this.sessions.set(userId, session);
-    }
+    const session = await this.getOrCreateSession(userId, message.contextToken);
 
     // Always update contextToken to the latest
     session.contextToken = message.contextToken;
@@ -107,6 +107,44 @@ export class SessionManager {
         this.opts.log(`[${userId}] queue processing error: ${String(err)}`);
       });
     }
+  }
+
+  /**
+   * Return the live session for a user, or spawn one if none exists. Concurrent
+   * callers during the spawn window (agent boot takes seconds) share a single
+   * in-flight createSession via `pendingSessions`, so a burst of messages after
+   * //cd (or any session teardown) spawns exactly one agent — not one per
+   * message.
+   */
+  private getOrCreateSession(userId: string, contextToken: string): Promise<UserSession> {
+    const existing = this.sessions.get(userId);
+    if (existing) return Promise.resolve(existing);
+
+    const pending = this.pendingSessions.get(userId);
+    if (pending) return pending;
+
+    if (this.sessions.size >= this.opts.maxConcurrentUsers) {
+      // Evict oldest idle session
+      this.evictOldest();
+    }
+
+    const creating = this.createSession(userId, contextToken)
+      .then((session) => {
+        // If the bridge is shutting down (or this user's session was torn down
+        // while we were booting), kill the agent we just spawned and reject so
+        // the caller doesn't enqueue into a dead session.
+        if (this.aborted) {
+          killAgent(session.agentInfo.process);
+          throw new Error("session creation aborted");
+        }
+        this.sessions.set(userId, session);
+        return session;
+      })
+      .finally(() => {
+        this.pendingSessions.delete(userId);
+      });
+    this.pendingSessions.set(userId, creating);
+    return creating;
   }
 
   getSession(userId: string): UserSession | undefined {
@@ -160,9 +198,26 @@ export class SessionManager {
       return { ok: false, error: resolved.error };
     }
 
-    const hadSession = this.sessions.has(userId);
-    const session = this.sessions.get(userId);
+    const hadSession = this.sessions.has(userId) || this.pendingSessions.has(userId);
 
+    // Update the override FIRST so any session spawned from here on (a concurrent
+    // enqueue, or the pending createSession we're about to wait out and kill)
+    // resolves the new directory. We then tear down whatever was running before.
+    this.userCwdOverrides.set(userId, resolved.path);
+
+    // Wait out an in-flight createSession so its process is registered and we
+    // can kill it. Without this, a session spawned with the old cwd would be
+    // re-inserted into the map after we delete, leaking a process.
+    const pending = this.pendingSessions.get(userId);
+    if (pending) {
+      try {
+        await pending;
+      } catch {
+        // createSession failures are logged within; proceed to teardown below.
+      }
+    }
+
+    const session = this.sessions.get(userId);
     if (session) {
       session.queue.length = 0;
       session.suppressOutbound = true;
@@ -183,8 +238,6 @@ export class SessionManager {
       this.sessions.delete(userId);
       this.opts.log(`[${userId}] Agent stopped for directory change`);
     }
-
-    this.userCwdOverrides.set(userId, resolved.path);
 
     this.opts.log(`[${userId}] Agent cwd set to ${resolved.path}`);
     return { ok: true, path: resolved.path, hadSession };
