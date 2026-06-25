@@ -152,7 +152,10 @@ export class SessionManager {
    * The next inbound message spawns a fresh agent in the new cwd.
    */
   async changeWorkingDirectory(userId: string, rawPath: string): Promise<ChangeDirectoryResult> {
-    const resolved = await resolveAgentDirectory(rawPath, this.opts.agentCwd);
+    // Resolve relative paths against the user's *current* effective cwd (honoring
+    // any prior //cd override), mirroring shell `cd` semantics — not the static
+    // default agent cwd.
+    const resolved = await resolveAgentDirectory(rawPath, this.getAgentCwd(userId));
     if (!resolved.ok) {
       return { ok: false, error: resolved.error };
     }
