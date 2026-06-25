@@ -27,7 +27,7 @@ import {
 } from "./bridge-commands.js";
 import { sendWeixinMediaFile } from "./weixin/messaging/send-media.js";
 import { weixinMessageToPrompt } from "./adapter/inbound.js";
-import { formatForWeChat } from "./adapter/outbound.js";
+import { filterMarkdown } from "./weixin/messaging/markdown-filter.js";
 import type { WeChatAcpConfig } from "./config.js";
 import { bodyFromItemList } from "./weixin/messaging/inbound.js";
 
@@ -315,7 +315,7 @@ export class WeChatAcpBridge {
       return;
     }
 
-    const formatted = formatForWeChat(text);
+    const formatted = filterMarkdown(text);
     const segments = splitText(formatted, TEXT_CHUNK_LIMIT);
 
     for (const segment of segments) {

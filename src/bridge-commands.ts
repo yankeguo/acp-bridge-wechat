@@ -134,14 +134,14 @@ function replyForCd(result: ChangeDirectoryResult): string {
   const restarted = result.hadSession
     ? "已结束当前 agent 进程，下一条消息将在新目录中启动。"
     : "下一条消息将在新目录中启动 agent。";
-  return `工作目录已切换为:\n${result.path}\n\n${restarted}`;
+  return `**工作目录已切换为**\n\n\`${result.path}\`\n\n${restarted}`;
 }
 
 function replyForFile(result: SendFileResult): string {
   if (!result.ok) {
     return result.error;
   }
-  return `已发送文件: ${result.fileName}`;
+  return `已发送文件: \`${result.fileName}\``;
 }
 
 function replyForCronAdd(result: CronAddResult): string {
@@ -149,7 +149,7 @@ function replyForCronAdd(result: CronAddResult): string {
     return result.error;
   }
   const j = result.job;
-  return `已添加调度任务 #${j.id}:\n表达式: ${j.expression}\nPrompt: ${truncate(j.prompt, 80)}`;
+  return `**已添加调度任务 #${j.id}**\n\n- 表达式: \`${j.expression}\`\n- Prompt: ${truncate(j.prompt, 80)}`;
 }
 
 function replyForCronDel(result: CronDeleteResult): string {
@@ -166,9 +166,9 @@ function replyForCronList(jobs: CronJob[], nextRun: (job: CronJob) => Date | nul
   const lines = jobs.map((j) => {
     const next = nextRun(j);
     const nextStr = next ? formatDateTime(next) : "未知";
-    return `#${j.id}  [${j.expression}]\n  prompt: ${truncate(j.prompt, 60)}\n  下次触发: ${nextStr}`;
+    return `- **#${j.id}** \`${j.expression}\` — ${truncate(j.prompt, 60)}（下次: ${nextStr}）`;
   });
-  return `调度任务 (${jobs.length}):\n${lines.join("\n")}`;
+  return `**调度任务 (${jobs.length})**\n\n${lines.join("\n")}`;
 }
 
 function formatDateTime(d: Date): string {
@@ -182,29 +182,32 @@ function truncate(s: string, max: number): string {
 }
 
 const CRON_USAGE = [
-  "用法:",
-  "  //cron                                显示此帮助",
-  "  //cron list                           列出当前用户的调度任务",
-  "  //cron del <id>                       删除指定调度任务",
-  '  //cron add "<cron-expr>" <prompt>     新增调度任务（cron 表达式须带引号，因为含空格）',
+  "**//cron 用法**",
   "",
-  "示例:",
-  '  //cron add "*/5 * * * *" 检查部署状态并汇报',
+  "- `//cron` — 显示本帮助",
+  "- `//cron list` — 列出当前用户的调度任务",
+  "- `//cron del <id>` — 删除指定调度任务",
+  '- `//cron add "<cron-expr>" <prompt>` — 新增调度任务（cron 表达式须带引号，因为含空格）',
+  "",
+  "**示例**",
+  "",
+  '`//cron add "*/5 * * * *" 检查部署状态并汇报`',
 ].join("\n");
 
-const CD_USAGE = "用法: //cd <目录>\n例如: //cd /path/to/project 或 //cd ../other-repo";
-const FILE_USAGE = "用法: //file <文件路径>\n例如: //file ./output/report.pdf 或 //file /tmp/data.json";
+const CD_USAGE = "**用法**: `//cd <目录>`\n\n例如: `//cd /path/to/project` 或 `//cd ../other-repo`";
+const FILE_USAGE = "**用法**: `//file <文件路径>`\n\n例如: `//file ./output/report.pdf` 或 `//file /tmp/data.json`";
 const UNKNOWN_USAGE = (cmd: string) =>
-  `未知 bridge 命令: ${cmd}\n输入 //help 查看支持的命令`;
+  `未知 bridge 命令: \`${cmd}\`\n\n输入 \`//help\` 查看支持的命令`;
 
 const HELP_USAGE = [
-  "可用命令:",
-  "  //stop                       停止当前 agent 回复并清空排队消息",
-  "  //cd <目录>                  切换 agent 工作目录（下一条消息重启 agent）",
-  "  //pwd                        打印当前 agent 工作目录",
-  "  //file <路径>                向用户发送本地文件",
-  "  //cron                       管理定时调度任务（//cron 查看子命令）",
-  "  //help                       显示本帮助",
+  "**可用命令**",
+  "",
+  "- `//stop` — 停止当前 agent 回复并清空排队消息",
+  "- `//cd <目录>` — 切换 agent 工作目录（下一条消息重启 agent）",
+  "- `//pwd` — 打印当前 agent 工作目录",
+  "- `//file <路径>` — 向用户发送本地文件",
+  "- `//cron` — 管理定时调度任务（`//cron` 查看子命令）",
+  "- `//help` — 显示本帮助",
 ].join("\n");
 
 /* ------------------------------------------------------------------ *
@@ -259,7 +262,7 @@ export async function handleBridgeCommand(
     case "pwd": {
       // No arguments; ignore any trailing remainder.
       const cwd = deps.printWorkingDirectory(userId);
-      return { handled: true, reply: `当前工作目录:\n${cwd}` };
+      return { handled: true, reply: `**当前工作目录**\n\n\`${cwd}\`` };
     }
     case "cd": {
       // The remainder (trimmed) is the directory path.
@@ -314,7 +317,7 @@ async function handleCron(
     case "del": {
       const idToken = tk.readWord();
       if (!idToken) {
-        return { handled: true, reply: '用法: //cron del <id>\n例如: //cron del 3' };
+        return { handled: true, reply: '**用法**: `//cron del <id>`\n\n例如: `//cron del 3`' };
       }
       const id = Number(idToken);
       if (!Number.isInteger(id) || id <= 0) {
@@ -334,7 +337,7 @@ async function handleCron(
         }
         return {
           handled: true,
-          reply: `cron 表达式必须用引号括起来（因为含空格）。\n例如: //cron add "*/5 * * * *" 检查部署状态\n\n${CRON_USAGE}`,
+          reply: `cron 表达式必须用引号括起来（因为含空格）。\n\n例如: \`//cron add "*/5 * * * *" 检查部署状态\`\n\n${CRON_USAGE}`,
         };
       }
       if (!expression.trim()) {
