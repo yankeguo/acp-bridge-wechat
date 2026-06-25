@@ -1,6 +1,6 @@
 {
   "name": "acp-bridge-wechat",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "ilink_appid": "bot",
   "description": "Bridge WeChat to any ACP-compatible AI agent",
   "type": "module",

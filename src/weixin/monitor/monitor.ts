@@ -2,7 +2,7 @@
  * WeChat long-poll monitor (vendored from openclaw-weixin).
  */
 
-import { getUpdates } from "../api/api.js";
+import { getUpdates, classifyFetchError } from "../api/api.js";
 import type { WeixinConfigManager } from "../api/config-cache.js";
 import {
   SESSION_EXPIRED_ERRCODE,
@@ -69,6 +69,9 @@ export async function startMonitor(opts: MonitorOpts): Promise<void> {
         token,
         get_updates_buf: getUpdatesBuf,
         timeoutMs: nextTimeoutMs,
+        // Bridge stop should cancel the in-flight long-poll immediately
+        // instead of waiting for the server-side long-poll timeout.
+        abortSignal,
       });
 
       if (resp.longpolling_timeout_ms != null && resp.longpolling_timeout_ms > 0) {
@@ -125,8 +128,13 @@ export async function startMonitor(opts: MonitorOpts): Promise<void> {
       if (abortSignal?.aborted) return;
 
       consecutiveFailures++;
-      logger.error(`getUpdates error (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): ${String(err)}`);
-      log(`getUpdates error (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): ${String(err)}`);
+      const classified = classifyFetchError(err);
+      logger.error(
+        `getUpdates error (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): ${String(err)} type=${classified.type} description=${classified.description}${classified.code ? ` code=${classified.code}` : ""}`,
+      );
+      log(
+        `getUpdates error (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): ${String(err)} type=${classified.type}${classified.code ? ` code=${classified.code}` : ""}`,
+      );
 
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
         log(`${MAX_CONSECUTIVE_FAILURES} consecutive failures, backing off ${BACKOFF_DELAY_MS / 1000}s`);

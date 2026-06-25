@@ -18,6 +18,7 @@ import type {
   NotifyStopResp,
   NotifyStartResp,
   SendMessageReq,
+  SendMessageResp,
   SendTypingReq,
   GetConfigResp,
 } from "./types.js";
@@ -197,6 +198,68 @@ export async function apiGetFetch(params: {
   }
 }
 
+/**
+ * Classify a fetch-level error into a category for logging / diagnostics.
+ * This does NOT cover HTTP-level errors (4xx/5xx) — those are thrown separately.
+ */
+export function classifyFetchError(err: unknown): {
+  type: "dns" | "tcp" | "tls" | "timeout" | "unknown";
+  description: string;
+  code?: string;
+} {
+  if (err instanceof Error && err.name === "AbortError") {
+    return { type: "timeout", description: "request timeout" };
+  }
+
+  const cause = (err as NodeJS.ErrnoException)?.cause;
+  const causeCode = (cause as any)?.code ?? "";
+  const causeStr = String(cause ?? err ?? "") + " " + String(causeCode);
+  const matchedCode = causeCode || (typeof cause === "string" ? cause : "");
+
+  if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(causeStr)) {
+    return { type: "dns", description: "DNS resolution failed, check DNS configuration", ...(matchedCode ? { code: matchedCode } : {}) };
+  }
+  if (/ECONNREFUSED/i.test(causeStr)) {
+    return { type: "tcp", description: "TCP connection refused", ...(matchedCode ? { code: matchedCode } : {}) };
+  }
+  if (/UND_ERR_CONNECT_TIMEOUT|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH/i.test(causeStr)) {
+    return { type: "tcp", description: "TCP connection timeout or unreachable", ...(matchedCode ? { code: matchedCode } : {}) };
+  }
+  if (/UND_ERR_SOCKET|SSL|TLS|CERT|UNABLE_TO_VERIFY|DEPTH_ZERO/i.test(causeStr)) {
+    return { type: "tls", description: "TLS handshake error", ...(matchedCode ? { code: matchedCode } : {}) };
+  }
+
+  return { type: "unknown", description: "network request failed" };
+}
+
+/**
+ * Combine an internal timeout controller with an optional external abort signal.
+ * Lets bridge stop() aborts cancel in-flight long-poll requests immediately
+ * while preserving the timeout-driven AbortError path.
+ */
+function combineAbortSignals(params: {
+  internal?: AbortController;
+  external?: AbortSignal;
+}): { signal?: AbortSignal; cleanup: () => void } {
+  const { internal, external } = params;
+  if (!external) {
+    return { signal: internal?.signal, cleanup: () => {} };
+  }
+  if (!internal) {
+    return { signal: external, cleanup: () => {} };
+  }
+  if (external.aborted) {
+    internal.abort();
+    return { signal: internal.signal, cleanup: () => {} };
+  }
+  const onExternalAbort = () => internal.abort();
+  external.addEventListener("abort", onExternalAbort, { once: true });
+  return {
+    signal: internal.signal,
+    cleanup: () => external.removeEventListener("abort", onExternalAbort),
+  };
+}
+
 export async function apiPostFetch(params: {
   baseUrl: string;
   endpoint: string;
@@ -204,6 +267,7 @@ export async function apiPostFetch(params: {
   token?: string;
   timeoutMs?: number;
   label: string;
+  abortSignal?: AbortSignal;
 }): Promise<string> {
   const base = ensureTrailingSlash(params.baseUrl);
   const url = new URL(params.endpoint, base);
@@ -216,12 +280,16 @@ export async function apiPostFetch(params: {
     controller != null && params.timeoutMs !== undefined
       ? setTimeout(() => controller.abort(), params.timeoutMs)
       : undefined;
+  const { signal, cleanup } = combineAbortSignals({
+    internal: controller,
+    external: params.abortSignal,
+  });
   try {
     const res = await fetch(url.toString(), {
       method: "POST",
       headers: hdrs,
       body: params.body,
-      ...(controller ? { signal: controller.signal } : {}),
+      ...(signal ? { signal } : {}),
     });
     if (t !== undefined) clearTimeout(t);
     const rawText = await res.text();
@@ -233,6 +301,8 @@ export async function apiPostFetch(params: {
   } catch (err) {
     if (t !== undefined) clearTimeout(t);
     throw err;
+  } finally {
+    cleanup();
   }
 }
 
@@ -241,6 +311,12 @@ export async function getUpdates(
     baseUrl: string;
     token?: string;
     timeoutMs?: number;
+    /**
+     * Optional external abort signal from the bridge. When stopping the bridge,
+     * this aborts the in-flight long-poll immediately instead of waiting for
+     * the server-side long-poll timeout.
+     */
+    abortSignal?: AbortSignal;
   },
 ): Promise<GetUpdatesResp> {
   const timeout = params.timeoutMs ?? DEFAULT_LONG_POLL_TIMEOUT_MS;
@@ -255,11 +331,18 @@ export async function getUpdates(
       token: params.token,
       timeoutMs: timeout,
       label: "getUpdates",
+      abortSignal: params.abortSignal,
     });
     return JSON.parse(rawText) as GetUpdatesResp;
   } catch (err) {
+    // Long-poll timeout or external abort are both normal control-flow exits.
+    // The monitor loop checks abortSignal after return and exits when needed.
     if (err instanceof Error && err.name === "AbortError") {
-      logger.debug(`getUpdates: client-side timeout after ${timeout}ms, returning empty response`);
+      if (params.abortSignal?.aborted) {
+        logger.debug(`getUpdates: aborted by external signal`);
+      } else {
+        logger.debug(`getUpdates: client-side timeout after ${timeout}ms, returning empty response`);
+      }
       return { ret: 0, msgs: [], get_updates_buf: params.get_updates_buf };
     }
     throw err;
@@ -296,7 +379,7 @@ export async function getUploadUrl(
 export async function sendMessage(
   params: WeixinApiOptions & { body: SendMessageReq },
 ): Promise<void> {
-  await apiPostFetch({
+  const rawText = await apiPostFetch({
     baseUrl: params.baseUrl,
     endpoint: "ilink/bot/sendmessage",
     body: JSON.stringify({ ...params.body, base_info: buildBaseInfo() }),
@@ -304,6 +387,12 @@ export async function sendMessage(
     timeoutMs: params.timeoutMs ?? DEFAULT_API_TIMEOUT_MS,
     label: "sendMessage",
   });
+  const resp = JSON.parse(rawText) as SendMessageResp;
+  if (resp.ret && resp.ret !== 0) {
+    throw new Error(
+      `sendMessage ret=${resp.ret} errmsg=${resp.errmsg ?? "(none)"}`,
+    );
+  }
 }
 
 export async function getConfig(
