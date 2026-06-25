@@ -121,7 +121,8 @@ export class WeChatAcpBridge {
 
     this.cronManager = new CronManager({
       storageDir: this.config.storage.dir,
-      fire: (userId, prompt) => this.fireCronJob(userId, prompt),
+      defaultAgentCwd: this.config.agent.cwd,
+      fire: (userId, prompt, cwd) => this.fireCronJob(userId, prompt, cwd),
       log: this.log,
     });
     await this.cronManager.start();
@@ -216,7 +217,8 @@ export class WeChatAcpBridge {
         changeDirectory: (uid, dir) => this.sessionManager!.changeWorkingDirectory(uid, dir),
         printWorkingDirectory: (uid) => this.sessionManager!.getAgentCwd(uid),
         sendFile: (uid, token, filePath) => this.sendFileToUser(uid, token, filePath),
-        addCron: (uid, expr, prompt) => this.cronManager!.add(uid, expr, prompt),
+        addCron: (uid, expr, prompt) =>
+          this.cronManager!.add(uid, expr, prompt, this.sessionManager!.getAgentCwd(uid)),
         deleteCron: (uid, id) => this.cronManager!.delete(uid, id),
         listCrons: (uid) => this.cronManager!.list(uid),
         cronNextRun: (job) => this.cronManager!.nextRunOf(job),
@@ -239,19 +241,20 @@ export class WeChatAcpBridge {
   }
 
   /**
-   * Fire a cron job's prompt into the owner's ACP session.
-   * Uses the user's last persisted context_token; skips silently if none.
+   * Fire a cron job's prompt in a throwaway agent bound to the job's captured
+   * working directory. Uses the user's last persisted context_token to address
+   * them; skips silently if none. Runs independently of the user's interactive
+   * agent and current `//cd` override.
    */
-  private async fireCronJob(userId: string, prompt: string): Promise<void> {
+  private async fireCronJob(userId: string, prompt: string, cwd: string): Promise<void> {
     const contextToken = await resolveContextToken(this.config.storage.dir, userId);
     if (!contextToken) {
       this.log(`[${userId}] cron fire skipped: no context_token (user has never messaged)`);
       return;
     }
-    await this.sessionManager!.enqueue(userId, {
-      prompt: [{ type: "text", text: prompt }],
-      contextToken,
-    });
+    await this.sessionManager!.runOnce(userId, contextToken, cwd, [
+      { type: "text", text: prompt },
+    ]);
   }
 
   private async sendFileToUser(

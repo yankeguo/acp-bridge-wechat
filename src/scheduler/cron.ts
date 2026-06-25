@@ -17,6 +17,13 @@ export interface CronJob {
   userId: string;
   expression: string;
   prompt: string;
+  /**
+   * Absolute working directory captured when the job was created. The job fires
+   * in an ephemeral agent bound to this directory, independent of the owner's
+   * current `//cd` override. Legacy jobs persisted without this field are
+   * back-filled with `defaultAgentCwd` on restore.
+   */
+  cwd: string;
   createdAt: number;
 }
 
@@ -34,8 +41,13 @@ export type CronDeleteResult =
 
 export interface CronManagerOpts {
   storageDir: string;
-  /** Invoked when a job fires. Should enqueue the prompt into the user's session. */
-  fire: (userId: string, prompt: string) => void | Promise<void>;
+  /**
+   * Default agent cwd, used to back-fill the `cwd` field of jobs persisted
+   * before per-job cwd capture existed.
+   */
+  defaultAgentCwd: string;
+  /** Invoked when a job fires. Should run the prompt in the job's bound cwd. */
+  fire: (userId: string, prompt: string, cwd: string) => void | Promise<void>;
   log: (msg: string) => void;
 }
 
@@ -73,13 +85,22 @@ export class CronManager {
 
     const file = await readJsonFile<CronJobsFile>(getCronJobsFilePath(this.opts.storageDir));
     if (file?.jobs && Array.isArray(file.jobs)) {
+      let backfilled = 0;
       for (const job of file.jobs) {
         if (!isValidCronJobShape(job)) continue;
+        // Back-fill cwd for jobs persisted before per-job cwd capture existed.
+        if (!job.cwd) {
+          job.cwd = this.opts.defaultAgentCwd;
+          backfilled++;
+        }
         this.jobs.push(job);
         this.scheduleJob(job);
       }
       if (this.jobs.length > 0) {
-        this.opts.log(`Restored ${this.jobs.length} cron job(s) from disk`);
+        this.opts.log(
+          `Restored ${this.jobs.length} cron job(s) from disk` +
+            (backfilled > 0 ? ` (${backfilled} back-filled with default cwd)` : ""),
+        );
       }
     }
   }
@@ -108,7 +129,7 @@ export class CronManager {
     return this.tasks.get(taskKey(job))?.getNextRun() ?? null;
   }
 
-  add(userId: string, expression: string, prompt: string): CronAddResult {
+  add(userId: string, expression: string, prompt: string, cwd: string): CronAddResult {
     const trimmedExpr = expression.trim();
     if (!trimmedExpr) {
       return { ok: false, error: "cron 表达式不能为空" };
@@ -120,6 +141,10 @@ export class CronManager {
     if (!trimmedPrompt) {
       return { ok: false, error: "prompt 不能为空" };
     }
+    const trimmedCwd = cwd.trim();
+    if (!trimmedCwd) {
+      return { ok: false, error: "工作目录不能为空" };
+    }
 
     const id = nextJobId(this.jobs);
     const job: CronJob = {
@@ -127,6 +152,7 @@ export class CronManager {
       userId,
       expression: trimmedExpr,
       prompt: trimmedPrompt,
+      cwd: trimmedCwd,
       createdAt: Date.now(),
     };
     this.jobs.push(job);
@@ -156,9 +182,11 @@ export class CronManager {
     const task = cron.schedule(
       job.expression,
       () => {
-        this.opts.log(`[${job.userId}] cron job #${job.id} fired: "${truncate(job.prompt, 60)}"`);
+        this.opts.log(
+          `[${job.userId}] cron job #${job.id} fired: "${truncate(job.prompt, 60)}" (cwd: ${job.cwd})`,
+        );
         try {
-          const ret = this.opts.fire(job.userId, job.prompt);
+          const ret = this.opts.fire(job.userId, job.prompt, job.cwd);
           if (ret && typeof (ret as Promise<void>).catch === "function") {
             (ret as Promise<void>).catch((err) => {
               this.opts.log(`[${job.userId}] cron job #${job.id} fire failed: ${String(err)}`);
@@ -202,6 +230,11 @@ function truncate(s: string, max: number): string {
   return t.replace(/\s+/g, " ");
 }
 
+/**
+ * Validate the persisted shape of a cron job. The `cwd` field is optional here
+ * so that jobs written before per-job cwd capture was introduced still restore
+ * (they get back-filled with the default agent cwd in `start()`).
+ */
 function isValidCronJobShape(job: unknown): job is CronJob {
   if (typeof job !== "object" || job === null) return false;
   const j = job as Record<string, unknown>;
@@ -210,6 +243,8 @@ function isValidCronJobShape(job: unknown): job is CronJob {
     typeof j.userId === "string" &&
     typeof j.expression === "string" &&
     typeof j.prompt === "string" &&
-    typeof j.createdAt === "number"
+    typeof j.createdAt === "number" &&
+    // cwd may be absent on legacy entries; checked/back-filled at restore time.
+    (j.cwd === undefined || typeof j.cwd === "string")
   );
 }

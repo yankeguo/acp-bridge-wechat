@@ -149,7 +149,7 @@ function replyForCronAdd(result: CronAddResult): string {
     return result.error;
   }
   const j = result.job;
-  return `**已添加调度任务 #${j.id}**\n\n- 表达式: \`${j.expression}\`\n- Prompt: ${truncate(j.prompt, 80)}`;
+  return `**已添加调度任务 #${j.id}**\n\n- 表达式: \`${j.expression}\`\n- 工作目录: \`${j.cwd}\`\n- Prompt: ${truncate(j.prompt, 80)}`;
 }
 
 function replyForCronDel(result: CronDeleteResult): string {
@@ -166,7 +166,7 @@ function replyForCronList(jobs: CronJob[], nextRun: (job: CronJob) => Date | nul
   const lines = jobs.map((j) => {
     const next = nextRun(j);
     const nextStr = next ? formatDateTime(next) : "未知";
-    return `- **#${j.id}** \`${j.expression}\` — ${truncate(j.prompt, 60)}（下次: ${nextStr}）`;
+    return `- **#${j.id}** \`${j.expression}\` — ${truncate(j.prompt, 60)}\n  @ \`${truncate(j.cwd, 60)}\`（下次: ${nextStr}）`;
   });
   return `**调度任务 (${jobs.length})**\n\n${lines.join("\n")}`;
 }
@@ -188,6 +188,10 @@ const CRON_USAGE = [
   "- `//cron list` — 列出当前用户的调度任务",
   "- `//cron del <id>` — 删除指定调度任务",
   '- `//cron add "<cron-expr>" <prompt>` — 新增调度任务（cron 表达式须带引号，因为含空格）',
+  "",
+  "**说明**",
+  "",
+  "任务在**创建时的工作目录**下、以独立 agent 执行，与用户当前 `//cd` 互不影响。",
   "",
   "**示例**",
   "",

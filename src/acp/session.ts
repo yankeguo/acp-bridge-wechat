@@ -187,6 +187,83 @@ export class SessionManager {
     return { ok: true, path: resolved.path, hadSession };
   }
 
+  /**
+   * Run a single prompt against a throwaway agent bound to `cwd`, then tear it
+   * down. Used by the cron scheduler so a scheduled task runs in the directory
+   * captured when it was created — independent of the user's current `//cd`
+   * override and their interactive agent. This path never touches the
+   * `sessions` map: it does not count against `maxConcurrentUsers`, cannot be
+   * evicted, and cannot collide with the user's interactive turn.
+   */
+  async runOnce(
+    userId: string,
+    contextToken: string,
+    cwd: string,
+    prompt: acp.ContentBlock[],
+  ): Promise<void> {
+    this.opts.log(`[${userId}] Starting ephemeral agent for scheduled task (cwd: ${cwd})`);
+
+    const client = new WeChatAcpClient({
+      sendTyping: () => this.opts.sendTyping(userId, contextToken),
+      onThoughtFlush: async (text) => {
+        await this.opts.onReply(userId, contextToken, text);
+      },
+      log: (msg) => this.opts.log(`[${userId}] ${msg}`),
+      showThoughts: this.opts.showThoughts,
+    });
+
+    let agentInfo: AgentProcessInfo | null = null;
+    try {
+      agentInfo = await spawnAgent({
+        command: this.opts.agentCommand,
+        args: this.opts.agentArgs,
+        cwd,
+        env: this.opts.agentEnv,
+        client,
+        log: (msg) => this.opts.log(`[${userId}] ${msg}`),
+      });
+
+      // Send typing immediately so the user sees the scheduled task is running.
+      this.opts.sendTyping(userId, contextToken).catch(() => {});
+
+      this.opts.log(`[${userId}] Sending scheduled prompt to ephemeral agent...`);
+      const result = await agentInfo.connection.prompt({
+        sessionId: agentInfo.sessionId,
+        prompt,
+      });
+
+      let replyText = await client.flush();
+      if (result.stopReason === "cancelled") {
+        replyText += "\n[cancelled]";
+      } else if (result.stopReason === "refusal") {
+        replyText += "\n[agent refused to continue]";
+      }
+
+      this.opts.log(
+        `[${userId}] Ephemeral agent done (${result.stopReason}), reply ${replyText.length} chars`,
+      );
+
+      if (replyText.trim()) {
+        await this.opts.onReply(userId, contextToken, replyText);
+      }
+    } catch (err) {
+      this.opts.log(`[${userId}] Ephemeral agent error: ${String(err)}`);
+      try {
+        await this.opts.onReply(
+          userId,
+          contextToken,
+          `⚠️ Scheduled task error: ${String(err)}`,
+        );
+      } catch {
+        // best effort
+      }
+    } finally {
+      if (agentInfo) {
+        killAgent(agentInfo.process);
+      }
+    }
+  }
+
   private async createSession(userId: string, contextToken: string): Promise<UserSession> {
     const cwd = this.getAgentCwd(userId);
     this.opts.log(`Creating new session for ${userId} (cwd: ${cwd})`);

@@ -174,7 +174,9 @@ Bridge-owned commands use a **double slash** prefix so they are not confused wit
 
 #### Scheduled prompts (`//cron`)
 
-`//cron` schedules a prompt to be sent to the user's own ACP agent on a recurring schedule. Jobs are **per-user** (each user only sees and manages their own) and **persisted to disk**, so they survive bridge restarts. When a job fires, its prompt is enqueued into the owner's session exactly like a normal inbound message.
+`//cron` schedules a prompt to be sent to the user's own ACP agent on a recurring schedule. Jobs are **per-user** (each user only sees and manages their own) and **persisted to disk**, so they survive bridge restarts.
+
+Each job is bound to the **working directory in effect when it was created** (the user's `//cd` override at `//cron add` time). When a job fires, it runs in a short-lived agent spawned in that directory — independent of the user's interactive agent and their current `//cd`. So `//cd` after creating a job does not change where that job runs.
 
 | Command | Description |
 |---------|-------------|
@@ -189,7 +191,7 @@ Schedules use standard 5-field cron expressions (e.g. `*/5 * * * *` = every 5 mi
 //cron add "*/5 * * * *" 检查部署状态并汇报
 ```
 
-A job fires only if the user has previously messaged the bot (a reply `context_token` is required to address them). Fires are enqueued behind any in-flight message for that user.
+A job fires only if the user has previously messaged the bot (a reply `context_token` is required to address them). Each fire runs in its own ephemeral agent in the job's captured working directory; it does not queue behind or disturb the user's interactive session.
 
 ## Runtime Behavior
 
