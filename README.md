@@ -165,10 +165,30 @@ Bridge-owned commands use a **double slash** prefix so they are not confused wit
 | `//cd <dir>` | Switch this user's agent working directory and restart ACP (next message spawns a new agent process) |
 | `//pwd` | Print this user's current agent working directory (handled locally, not forwarded to ACP) |
 | `//file <path>` | Send a local file to this user via WeChat (images/videos/files; path relative to this user's agent cwd) |
+| `//cron` | Manage scheduled prompts (see below) |
 
 `//cd` overrides are **in-memory only** for the current bridge process. After a restart, each user's agent cwd comes from `--cwd`, config `agent.cwd`, or the bridge process working directory (whichever applies at startup)—not from a previous `//cd`.
 
 `//file` paths support `~`, absolute paths, and paths relative to the user's effective agent cwd (including any in-memory `//cd` override).
+
+#### Scheduled prompts (`//cron`)
+
+`//cron` schedules a prompt to be sent to the user's own ACP agent on a recurring schedule. Jobs are **per-user** (each user only sees and manages their own) and **persisted to disk**, so they survive bridge restarts. When a job fires, its prompt is enqueued into the owner's session exactly like a normal inbound message.
+
+| Command | Description |
+|---------|-------------|
+| `//cron` | Show usage |
+| `//cron list` | List this user's scheduled jobs (id, expression, prompt, next run) |
+| `//cron add "<expr>" <prompt>` | Add a job. The cron expression **must be quoted** because it contains spaces |
+| `//cron del <id>` | Delete a job by id |
+
+Schedules use standard 5-field cron expressions (e.g. `*/5 * * * *` = every 5 minutes, `0 9 * * 1-5` = 09:00 on weekdays) in the system timezone. Example:
+
+```
+//cron add "*/5 * * * *" 检查部署状态并汇报
+```
+
+A job fires only if the user has previously messaged the bot (a reply `context_token` is required to address them). Fires are enqueued behind any in-flight message for that user.
 
 ## Runtime Behavior
 
@@ -187,6 +207,7 @@ By default, runtime files are stored under:
 ├── token.json              # WeChat bot login token
 ├── sync-buf.json           # getUpdates long-poll cursor
 ├── context-tokens.json     # per-user reply context (survives restarts)
+├── cron-jobs.json          # per-user scheduled prompts (survives restarts)
 └── media/                  # decrypted inbound attachments (temp)
 ```
 
@@ -208,9 +229,10 @@ All disk I/O uses async `fs/promises` (no blocking sync calls in the runtime pat
 |------|------|
 | `bin/acp-bridge-wechat.ts` | CLI entry |
 | `src/bridge.ts` | Orchestrator: WeChat polling ↔ ACP sessions |
-| `src/bridge-commands.ts` | Bridge-owned `//` commands (`//stop`, `//cd`, `//pwd`, `//file`) |
+| `src/bridge-commands.ts` | Bridge-owned `//` commands (`//stop`, `//cd`, `//pwd`, `//file`, `//cron`) |
 | `src/acp/` | ACP client, per-user session manager, path helpers |
 | `src/adapter/` | WeChat ↔ ACP message conversion |
+| `src/scheduler/` | Cron-based scheduled prompts (`//cron`, backed by node-cron) |
 | `src/weixin/` | Vendored iLink protocol (API, login, CDN, monitor) |
 | `src/util/fs-json.ts` | Shared async JSON file helpers |
 

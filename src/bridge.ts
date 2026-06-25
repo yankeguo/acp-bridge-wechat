@@ -19,6 +19,7 @@ import { initWeixinLogger } from "./weixin/util/logger.js";
 import { assertSessionActive } from "./weixin/api/session-guard.js";
 import { restoreContextTokens, resolveContextToken } from "./weixin/storage/context-tokens.js";
 import { SessionManager } from "./acp/session.js";
+import { CronManager } from "./scheduler/cron.js";
 import {
   handleBridgeCommand,
   isBridgeCommandMessage,
@@ -36,6 +37,7 @@ export class WeChatAcpBridge {
   private config: WeChatAcpConfig;
   private abortController = new AbortController();
   private sessionManager: SessionManager | null = null;
+  private cronManager: CronManager | null = null;
   private tokenData: TokenData | null = null;
   private configManager: WeixinConfigManager | null = null;
   private typingTickets = new Map<string, string>();
@@ -117,6 +119,13 @@ export class WeChatAcpBridge {
     });
     this.sessionManager.start();
 
+    this.cronManager = new CronManager({
+      storageDir: this.config.storage.dir,
+      fire: (userId, prompt) => this.fireCronJob(userId, prompt),
+      log: this.log,
+    });
+    await this.cronManager.start();
+
     this.log("Starting message polling...");
     await startMonitor({
       baseUrl: this.tokenData.baseUrl,
@@ -133,6 +142,7 @@ export class WeChatAcpBridge {
   async stop(): Promise<void> {
     this.log("Stopping bridge...");
     this.abortController.abort();
+    await this.cronManager?.stop();
     await this.sessionManager?.stop();
 
     if (this.tokenData?.token) {
@@ -206,6 +216,10 @@ export class WeChatAcpBridge {
         changeDirectory: (uid, dir) => this.sessionManager!.changeWorkingDirectory(uid, dir),
         printWorkingDirectory: (uid) => this.sessionManager!.getAgentCwd(uid),
         sendFile: (uid, token, filePath) => this.sendFileToUser(uid, token, filePath),
+        addCron: (uid, expr, prompt) => this.cronManager!.add(uid, expr, prompt),
+        deleteCron: (uid, id) => this.cronManager!.delete(uid, id),
+        listCrons: (uid) => this.cronManager!.list(uid),
+        cronNextRun: (job) => this.cronManager!.nextRunOf(job),
       });
       if (result.handled) {
         await this.sendReply(userId, contextToken, result.reply);
@@ -222,6 +236,22 @@ export class WeChatAcpBridge {
     });
 
     await this.sessionManager!.enqueue(userId, { prompt, contextToken });
+  }
+
+  /**
+   * Fire a cron job's prompt into the owner's ACP session.
+   * Uses the user's last persisted context_token; skips silently if none.
+   */
+  private async fireCronJob(userId: string, prompt: string): Promise<void> {
+    const contextToken = await resolveContextToken(this.config.storage.dir, userId);
+    if (!contextToken) {
+      this.log(`[${userId}] cron fire skipped: no context_token (user has never messaged)`);
+      return;
+    }
+    await this.sessionManager!.enqueue(userId, {
+      prompt: [{ type: "text", text: prompt }],
+      contextToken,
+    });
   }
 
   private async sendFileToUser(

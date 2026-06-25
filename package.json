@@ -1,6 +1,6 @@
 {
   "name": "acp-bridge-wechat",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "ilink_appid": "bot",
   "description": "Bridge WeChat to any ACP-compatible AI agent",
   "type": "module",
@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.16.1",
+    "node-cron": "^4.5.0",
     "qrcode-terminal": "^0.12.0",
     "silk-wasm": "^3.7.1"
   },
