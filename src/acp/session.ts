@@ -7,6 +7,10 @@
  * Session creation is single-flight per user: a burst of messages arriving
  * while a new agent boots (e.g. right after //cd) coalesces onto one
  * createSession rather than spawning one agent per message.
+ *
+ * Every prompt is guarded against two hang modes — agent death (connection
+ * closed) and agent hang (hard timeout) — so a stuck or crashed agent is
+ * always torn down and its subprocess reclaimed, never pinning a user.
  */
 
 import type { ChildProcess } from "node:child_process";
@@ -43,6 +47,13 @@ export interface SessionManagerOpts {
   agentCwd: string;
   agentEnv?: Record<string, string>;
   idleTimeoutMs: number;
+  /**
+   * Per-prompt hard timeout in ms. If the agent neither responds nor exits
+   * within this window, the in-flight prompt is rejected so the caller's
+   * catch/finally tears the session down and reclaims the subprocess.
+   * 0 disables the timeout.
+   */
+  promptTimeoutMs: number;
   maxConcurrentUsers: number;
   showThoughts: boolean;
   log: (msg: string) => void;
@@ -51,27 +62,44 @@ export interface SessionManagerOpts {
 }
 
 /**
- * Send a prompt, racing the agent connection's lifetime. The ACP SDK never
- * rejects an in-flight `session/prompt` when the agent subprocess dies — its
- * receive loop only aborts an internal controller, leaving the pending request
- * promise unresolved forever. Without this guard, a crashed agent would hang
- * `connection.prompt()` indefinitely, pinning `session.processing = true` and
- * silently locking the user out of all future messages.
+ * Send a prompt, racing the agent connection's lifetime and a hard timeout.
  *
- * `connection.closed` resolves the moment the underlying stdio stream ends
- * (process exit), so we race it against the prompt and reject promptly, letting
- * the caller's catch/finally clean up and tear down the session.
+ * Two failure modes otherwise leave the prompt pending forever, pinning
+ * `session.processing = true` and silently locking the user out of all future
+ * messages:
+ *
+ * 1. Agent dies. The ACP SDK never rejects an in-flight `session/prompt` when
+ *    the subprocess exits — its receive loop only aborts an internal controller.
+ *    `connection.closed` resolves the moment the stdio stream ends, so we race
+ *    it against the prompt and reject promptly.
+ * 2. Agent hangs (alive but unresponsive). The connection never closes and the
+ *    prompt never resolves. A wall-clock timeout (timeoutMs > 0) is the only
+ *    way out; on expiry we reject so the caller's catch/finally reclaims the
+ *    subprocess.
  */
 async function promptWithConnectionGuard(
   connection: acp.ClientSideConnection,
   params: Parameters<acp.ClientSideConnection["prompt"]>[0],
+  timeoutMs: number,
 ): Promise<Awaited<ReturnType<acp.ClientSideConnection["prompt"]>>> {
-  return Promise.race([
+  const racers: Promise<Awaited<ReturnType<acp.ClientSideConnection["prompt"]>>>[] = [
     connection.prompt(params),
     connection.closed.then(() => {
       throw new Error("agent connection closed (process exited)");
     }),
-  ]);
+  ];
+  if (timeoutMs > 0) {
+    racers.push(
+      new Promise((_, reject) => {
+        const t = setTimeout(
+          () => reject(new Error(`agent prompt timed out after ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+        t.unref();
+      }),
+    );
+  }
+  return Promise.race(racers);
 }
 
 export class SessionManager {
@@ -311,10 +339,14 @@ export class SessionManager {
       this.opts.sendTyping(userId, contextToken).catch(() => {});
 
       this.opts.log(`[${userId}] Sending scheduled prompt to ephemeral agent...`);
-      const result = await promptWithConnectionGuard(agentInfo.connection, {
-        sessionId: agentInfo.sessionId,
-        prompt,
-      });
+      const result = await promptWithConnectionGuard(
+        agentInfo.connection,
+        {
+          sessionId: agentInfo.sessionId,
+          prompt,
+        },
+        this.opts.promptTimeoutMs,
+      );
 
       let replyText = await client.flush();
       if (result.stopReason === "cancelled") {
@@ -421,10 +453,14 @@ export class SessionManager {
 
           // Send ACP prompt
           this.opts.log(`[${session.userId}] Sending prompt to agent...`);
-          const result = await promptWithConnectionGuard(session.agentInfo.connection, {
-            sessionId: session.agentInfo.sessionId,
-            prompt: pending.prompt,
-          });
+          const result = await promptWithConnectionGuard(
+            session.agentInfo.connection,
+            {
+              sessionId: session.agentInfo.sessionId,
+              prompt: pending.prompt,
+            },
+            this.opts.promptTimeoutMs,
+          );
 
           const suppress = session.suppressOutbound;
           session.suppressOutbound = false;

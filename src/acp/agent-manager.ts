@@ -26,6 +26,11 @@ export async function spawnAgent(params: {
 
   // On Windows, shell mode avoids EINVAL/ENOENT for command shims like npx/claude/gemini.
   const useShell = process.platform === "win32";
+  // Detach on non-Windows so the agent gets its own process group. This lets
+  // killAgent send a signal to the *group* (negative pid) and reap the agent's
+  // own children too — critical for npx wrappers that otherwise orphan their
+  // spawned package process when only the npx shim receives the signal.
+  const detached = process.platform !== "win32";
 
   log(`Spawning agent: ${command} ${args.join(" ")} (cwd: ${cwd}, shell=${useShell})`);
 
@@ -35,6 +40,7 @@ export async function spawnAgent(params: {
     env: { ...process.env, ...env },
     shell: useShell,
     windowsHide: true,
+    detached,
   });
 
   proc.on("error", (err) => {
@@ -46,7 +52,7 @@ export async function spawnAgent(params: {
   });
 
   if (!proc.stdin || !proc.stdout) {
-    proc.kill();
+    killAgent(proc);
     throw new Error("Failed to get agent process stdio");
   }
 
@@ -56,45 +62,77 @@ export async function spawnAgent(params: {
 
   const connection = new acp.ClientSideConnection(() => client, stream);
 
-  // Initialize
-  log("Initializing ACP connection...");
-  const initResult = await connection.initialize({
-    protocolVersion: acp.PROTOCOL_VERSION,
-    clientInfo: {
-      name: packageJson.name,
-      title: packageJson.name,
-      version: packageJson.version,
-    },
-    clientCapabilities: {
-      fs: {
-        readTextFile: true,
-        writeTextFile: true,
+  // If initialize/newSession throws (slow cold start, resource exhaustion),
+  // clean up the already-spawned process instead of orphaning it.
+  try {
+    // Initialize
+    log("Initializing ACP connection...");
+    const initResult = await connection.initialize({
+      protocolVersion: acp.PROTOCOL_VERSION,
+      clientInfo: {
+        name: packageJson.name,
+        title: packageJson.name,
+        version: packageJson.version,
       },
-    },
-  });
-  log(`ACP initialized (protocol v${initResult.protocolVersion})`);
+      clientCapabilities: {
+        fs: {
+          readTextFile: true,
+          writeTextFile: true,
+        },
+      },
+    });
+    log(`ACP initialized (protocol v${initResult.protocolVersion})`);
 
-  // Create session
-  log("Creating ACP session...");
-  const sessionResult = await connection.newSession({
-    cwd,
-    mcpServers: [],
-  });
-  log(`ACP session created: ${sessionResult.sessionId}`);
+    // Create session
+    log("Creating ACP session...");
+    const sessionResult = await connection.newSession({
+      cwd,
+      mcpServers: [],
+    });
+    log(`ACP session created: ${sessionResult.sessionId}`);
 
-  return {
-    process: proc,
-    connection,
-    sessionId: sessionResult.sessionId,
-  };
+    return {
+      process: proc,
+      connection,
+      sessionId: sessionResult.sessionId,
+    };
+  } catch (err) {
+    killAgent(proc);
+    throw err;
+  }
 }
 
+/**
+ * Terminate an agent and, where possible, its whole process group.
+ *
+ * Agents are typically launched via an `npx <pkg>` wrapper; signalling only the
+ * wrapper pid orphans the real agent (the spawned package process) as it
+ * detaches. By spawning detached (own process group) we can target the group
+ * with a negative pid to reach every descendant. We fall back to a plain pid
+ * signal if the group signal fails (e.g. non-detached spawn, or already dead),
+ * and always escalate to SIGKILL after a grace window.
+ */
 export function killAgent(proc: ChildProcess): void {
-  if (!proc.killed) {
-    proc.kill("SIGTERM");
-    // Force kill after 5s if still alive
-    setTimeout(() => {
-      if (!proc.killed) proc.kill("SIGKILL");
-    }, 5_000).unref();
-  }
+  if (proc.killed) return;
+
+  const pid = proc.pid;
+  // Best effort: signal the entire process group first.
+  const tryKillGroup = (signal: NodeJS.Signals): boolean => {
+    if (!pid) return false;
+    try {
+      process.kill(-pid, signal);
+      return true;
+    } catch {
+      // Group may not exist (non-detached spawn, or group already reaped).
+      return false;
+    }
+  };
+
+  tryKillGroup("SIGTERM") || proc.kill("SIGTERM");
+  // Force kill after 5s if still alive
+  setTimeout(() => {
+    if (!proc.killed) {
+      tryKillGroup("SIGKILL") || proc.kill("SIGKILL");
+    }
+  }, 5_000).unref();
 }

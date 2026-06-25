@@ -82,6 +82,12 @@ export interface WeChatAcpConfig {
   agents: Record<string, AgentPreset>;
   session: {
     idleTimeoutMs: number;
+    /**
+     * Hard timeout (ms) for a single agent prompt. If the agent neither
+     * responds nor exits within this window, the prompt is aborted and the
+     * agent torn down so its subprocess (group) is reclaimed. 0 disables it.
+     */
+    promptTimeoutMs: number;
     maxConcurrentUsers: number;
   };
   storage: {
@@ -136,6 +142,9 @@ export function defaultConfig(opts?: { instance?: string }): WeChatAcpConfig {
     agents: { ...BUILT_IN_AGENTS },
     session: {
       idleTimeoutMs: 1440 * 60_000, // 24 hours
+      // 10 minutes covers slow npx cold starts (~1 min) plus generous agent
+      // thinking time, while still reclaiming a hung subprocess promptly.
+      promptTimeoutMs: 10 * 60_000,
       maxConcurrentUsers: 10,
     },
     storage: {

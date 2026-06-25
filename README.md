@@ -80,6 +80,7 @@ Options:
 - `--config <file>`: load JSON config file
 - `--instance <name>`: run as a named, isolated instance. See "Running multiple instances" below.
 - `--idle-timeout <minutes>`: session idle timeout, default `1440` (use `0` for unlimited)
+- `--prompt-timeout <minutes>`: per-prompt hard timeout, default `10` (use `0` to disable). A hung/crashed agent that neither responds nor exits is killed and the session rebuilt, so it can never lock a user out.
 - `--max-sessions <count>`: maximum concurrent user sessions, default `10`
 - `--hide-thoughts`: do not forward agent thinking to WeChat (default: forwarded)
 - `--bot-agent <ua>`: `bot_agent` identity sent with each WeChat API request (UA-style, e.g. `MyBot/1.0`)
@@ -126,6 +127,7 @@ Example:
   },
   "session": {
     "idleTimeoutMs": 86400000,
+    "promptTimeoutMs": 600000,
     "maxConcurrentUsers": 10
   }
 }
@@ -200,6 +202,8 @@ A job fires only if the user has previously messaged the bot (a reply `context_t
 - Replies are formatted for WeChat before sending.
 - Typing indicators are sent when supported by the WeChat API.
 - Sessions are cleaned up after inactivity (set `idleTimeoutMs` to `0` to disable idle cleanup).
+- Each prompt has a hard timeout (`promptTimeoutMs`, default 10 min; `--prompt-timeout`, `0` disables). An agent that hangs or crashes mid-prompt is killed and the session rebuilt, so a single stuck task can never lock a user out or leak its subprocess.
+- Agents are spawned in their own process group and torn down group-wide on kill, so an `npx` wrapper's child process is reclaimed too.
 
 ## Storage
 

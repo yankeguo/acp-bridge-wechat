@@ -48,6 +48,10 @@ Options:
                       its own WeChat account and project cwd.
   --idle-timeout <m>  Session idle timeout in minutes (default: 1440)
                       Use 0 to disable idle cleanup
+  --prompt-timeout <m> Per-prompt hard timeout in minutes (default: 10).
+                      If an agent neither responds nor exits within this
+                      window, it is killed and the session torn down, so a
+                      hung agent can never lock a user out. Use 0 to disable.
   --max-sessions <n>  Max concurrent user sessions (default: 10)
   --hide-thoughts     Do not forward agent thinking to WeChat (default: forwarded)
   --bot-agent <ua>    bot_agent for WeChat API (UA-style, e.g. "MyBot/1.0")
@@ -64,6 +68,7 @@ function parseArgs(argv: string[]): {
   configFile?: string;
   instance?: string;
   idleTimeout?: number;
+  promptTimeout?: number;
   maxSessions?: number;
   hideThoughts: boolean;
   botAgent?: string;
@@ -106,6 +111,9 @@ function parseArgs(argv: string[]): {
         break;
       case "--idle-timeout":
         result.idleTimeout = parseInt(args[++i], 10);
+        break;
+      case "--prompt-timeout":
+        result.promptTimeout = parseInt(args[++i], 10);
         break;
       case "--max-sessions":
         result.maxSessions = parseInt(args[++i], 10);
@@ -232,6 +240,14 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     config.session.idleTimeoutMs = args.idleTimeout * 60_000;
+  }
+  if (args.promptTimeout !== undefined) {
+    if (!Number.isFinite(args.promptTimeout) || args.promptTimeout < 0) {
+      console.error("Error: invalid --prompt-timeout value");
+      console.error('Use a non-negative integer minute value, where "0" means disabled.');
+      process.exit(1);
+    }
+    config.session.promptTimeoutMs = args.promptTimeout * 60_000;
   }
   if (args.maxSessions) config.session.maxConcurrentUsers = args.maxSessions;
   if (args.hideThoughts) config.agent.showThoughts = false;
