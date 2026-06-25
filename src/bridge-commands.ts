@@ -195,7 +195,17 @@ const CRON_USAGE = [
 const CD_USAGE = "用法: //cd <目录>\n例如: //cd /path/to/project 或 //cd ../other-repo";
 const FILE_USAGE = "用法: //file <文件路径>\n例如: //file ./output/report.pdf 或 //file /tmp/data.json";
 const UNKNOWN_USAGE = (cmd: string) =>
-  `未知 bridge 命令: ${cmd}\n当前支持: //stop, //cd, //pwd, //file, //cron`;
+  `未知 bridge 命令: ${cmd}\n输入 //help 查看支持的命令`;
+
+const HELP_USAGE = [
+  "可用命令:",
+  "  //stop                       停止当前 agent 回复并清空排队消息",
+  "  //cd <目录>                  切换 agent 工作目录（下一条消息重启 agent）",
+  "  //pwd                        打印当前 agent 工作目录",
+  "  //file <路径>                向用户发送本地文件",
+  "  //cron                       管理定时调度任务（//cron 查看子命令）",
+  "  //help                       显示本帮助",
+].join("\n");
 
 /* ------------------------------------------------------------------ *
  * Command dispatch
@@ -233,6 +243,14 @@ export async function handleBridgeCommand(
   const primary = tk.readWord().toLowerCase();
 
   switch (primary) {
+    case "": {
+      // Bare `//` → help.
+      return { handled: true, reply: HELP_USAGE };
+    }
+    case "help": {
+      // No arguments; ignore any trailing remainder.
+      return { handled: true, reply: HELP_USAGE };
+    }
     case "stop": {
       // No arguments; ignore any trailing remainder.
       const outcome = await deps.stopInteraction(userId);

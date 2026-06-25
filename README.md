@@ -166,6 +166,7 @@ Bridge-owned commands use a **double slash** prefix so they are not confused wit
 | `//pwd` | Print this user's current agent working directory (handled locally, not forwarded to ACP) |
 | `//file <path>` | Send a local file to this user via WeChat (images/videos/files; path relative to this user's agent cwd) |
 | `//cron` | Manage scheduled prompts (see below) |
+| `//help` | Show available bridge commands |
 
 `//cd` overrides are **in-memory only** for the current bridge process. After a restart, each user's agent cwd comes from `--cwd`, config `agent.cwd`, or the bridge process working directory (whichever applies at startup)—not from a previous `//cd`.
 
@@ -229,7 +230,7 @@ All disk I/O uses async `fs/promises` (no blocking sync calls in the runtime pat
 |------|------|
 | `bin/acp-bridge-wechat.ts` | CLI entry |
 | `src/bridge.ts` | Orchestrator: WeChat polling ↔ ACP sessions |
-| `src/bridge-commands.ts` | Bridge-owned `//` commands (`//stop`, `//cd`, `//pwd`, `//file`, `//cron`) |
+| `src/bridge-commands.ts` | Bridge-owned `//` commands (`//stop`, `//cd`, `//pwd`, `//file`, `//cron`, `//help`) |
 | `src/acp/` | ACP client, per-user session manager, path helpers |
 | `src/adapter/` | WeChat ↔ ACP message conversion |
 | `src/scheduler/` | Cron-based scheduled prompts (`//cron`, backed by node-cron) |
