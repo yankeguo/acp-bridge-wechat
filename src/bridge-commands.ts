@@ -13,6 +13,7 @@ export type SendFileResult =
 export type BridgeCommandDeps = {
   stopInteraction: (userId: string) => Promise<StopInteractionResult>;
   changeDirectory: (userId: string, rawPath: string) => Promise<ChangeDirectoryResult>;
+  printWorkingDirectory: (userId: string) => string;
   sendFile: (userId: string, contextToken: string, rawPath: string) => Promise<SendFileResult>;
 };
 
@@ -90,6 +91,10 @@ export async function handleBridgeCommand(
       const result = await deps.changeDirectory(userId, args);
       return { handled: true, reply: replyForCd(result) };
     }
+    case "//pwd": {
+      const cwd = deps.printWorkingDirectory(userId);
+      return { handled: true, reply: `当前工作目录:\n${cwd}` };
+    }
     case "//file": {
       if (!args) {
         return {
@@ -103,7 +108,7 @@ export async function handleBridgeCommand(
     default:
       return {
         handled: true,
-        reply: `未知 bridge 命令: ${command}\n当前支持: //stop, //cd, //file`,
+        reply: `未知 bridge 命令: ${command}\n当前支持: //stop, //cd, //pwd, //file`,
       };
   }
 }

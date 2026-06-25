@@ -204,6 +204,7 @@ export class WeChatAcpBridge {
       const result = await handleBridgeCommand(textBody, userId, contextToken, {
         stopInteraction: (uid) => this.sessionManager!.stopInteraction(uid),
         changeDirectory: (uid, dir) => this.sessionManager!.changeWorkingDirectory(uid, dir),
+        printWorkingDirectory: (uid) => this.sessionManager!.getAgentCwd(uid),
         sendFile: (uid, token, filePath) => this.sendFileToUser(uid, token, filePath),
       });
       if (result.handled) {
