@@ -3,6 +3,10 @@
  *
  * Each WeChat user gets their own agent subprocess + ACP session.
  * Messages are queued per-user to ensure serialized processing.
+ *
+ * Session creation is single-flight per user: a burst of messages arriving
+ * while a new agent boots (e.g. right after //cd) coalesces onto one
+ * createSession rather than spawning one agent per message.
  */
 
 import type { ChildProcess } from "node:child_process";
@@ -44,6 +48,30 @@ export interface SessionManagerOpts {
   log: (msg: string) => void;
   onReply: (userId: string, contextToken: string, text: string) => Promise<void>;
   sendTyping: (userId: string, contextToken: string) => Promise<void>;
+}
+
+/**
+ * Send a prompt, racing the agent connection's lifetime. The ACP SDK never
+ * rejects an in-flight `session/prompt` when the agent subprocess dies — its
+ * receive loop only aborts an internal controller, leaving the pending request
+ * promise unresolved forever. Without this guard, a crashed agent would hang
+ * `connection.prompt()` indefinitely, pinning `session.processing = true` and
+ * silently locking the user out of all future messages.
+ *
+ * `connection.closed` resolves the moment the underlying stdio stream ends
+ * (process exit), so we race it against the prompt and reject promptly, letting
+ * the caller's catch/finally clean up and tear down the session.
+ */
+async function promptWithConnectionGuard(
+  connection: acp.ClientSideConnection,
+  params: Parameters<acp.ClientSideConnection["prompt"]>[0],
+): Promise<Awaited<ReturnType<acp.ClientSideConnection["prompt"]>>> {
+  return Promise.race([
+    connection.prompt(params),
+    connection.closed.then(() => {
+      throw new Error("agent connection closed (process exited)");
+    }),
+  ]);
 }
 
 export class SessionManager {
@@ -283,7 +311,7 @@ export class SessionManager {
       this.opts.sendTyping(userId, contextToken).catch(() => {});
 
       this.opts.log(`[${userId}] Sending scheduled prompt to ephemeral agent...`);
-      const result = await agentInfo.connection.prompt({
+      const result = await promptWithConnectionGuard(agentInfo.connection, {
         sessionId: agentInfo.sessionId,
         prompt,
       });
@@ -393,7 +421,7 @@ export class SessionManager {
 
           // Send ACP prompt
           this.opts.log(`[${session.userId}] Sending prompt to agent...`);
-          const result = await session.agentInfo.connection.prompt({
+          const result = await promptWithConnectionGuard(session.agentInfo.connection, {
             sessionId: session.agentInfo.sessionId,
             prompt: pending.prompt,
           });
@@ -422,8 +450,15 @@ export class SessionManager {
         } catch (err) {
           this.opts.log(`[${session.userId}] Agent prompt error: ${String(err)}`);
 
-          // Check if agent died
-          if (session.agentInfo.process.killed || session.agentInfo.process.exitCode !== null) {
+          // Check if agent died (process exited or the ACP connection's stream
+          // ended — the promptWithConnectionGuard surfaces the latter as an
+          // error, and signal.aborted is set by the SDK when the stream ends).
+          const connectionDead = session.agentInfo.connection.signal.aborted;
+          if (
+            session.agentInfo.process.killed ||
+            session.agentInfo.process.exitCode !== null ||
+            connectionDead
+          ) {
             this.opts.log(`[${session.userId}] Agent process died, removing session`);
             this.sessions.delete(session.userId);
             return;

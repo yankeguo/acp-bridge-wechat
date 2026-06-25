@@ -247,7 +247,10 @@ export async function handleBridgeCommand(
   // Consume the leading slashes; the tokenizer works on the remainder.
   const tk = new Tokenizer(trimmed.slice(2));
 
-  const primary = tk.readWord().toLowerCase();
+  // Read the command word once; keep the original casing for error messages
+  // while switching on a lowercased copy.
+  const primaryRaw = tk.readWord();
+  const primary = primaryRaw.toLowerCase();
 
   switch (primary) {
     case "": {
@@ -291,7 +294,7 @@ export async function handleBridgeCommand(
     }
     default: {
       // Reconstruct the original `//<cmd>` form for the error message.
-      return { handled: true, reply: UNKNOWN_USAGE(`//${primary}`) };
+      return { handled: true, reply: UNKNOWN_USAGE(`//${primaryRaw}`) };
     }
   }
 }
@@ -304,7 +307,10 @@ async function handleCron(
   userId: string,
   deps: BridgeCommandDeps,
 ): Promise<BridgeCommandHandleResult> {
-  const sub = tk.readWord().toLowerCase();
+  // Read the subcommand word once; keep the original casing for error messages
+  // while switching on a lowercased copy.
+  const subRaw = tk.readWord();
+  const sub = subRaw.toLowerCase();
 
   switch (sub) {
     case "": {
@@ -323,10 +329,12 @@ async function handleCron(
       if (!idToken) {
         return { handled: true, reply: '**用法**: `//cron del <id>`\n\n例如: `//cron del 3`' };
       }
-      const id = Number(idToken);
-      if (!Number.isInteger(id) || id <= 0) {
+      // Reject anything that isn't a plain base-10 positive integer, so inputs
+      // like `0x10`, `1e2`, `3.5`, `+3` are not silently coerced by Number().
+      if (!/^[1-9]\d*$/.test(idToken)) {
         return { handled: true, reply: `无效的任务 id: ${idToken}（应为正整数）` };
       }
+      const id = Number(idToken);
       // Ignore any trailing remainder after the id.
       const result = deps.deleteCron(userId, id);
       return { handled: true, reply: replyForCronDel(result) };
@@ -344,18 +352,17 @@ async function handleCron(
           reply: `cron 表达式必须用引号括起来（因为含空格）。\n\n例如: \`//cron add "*/5 * * * *" 检查部署状态\`\n\n${CRON_USAGE}`,
         };
       }
-      if (!expression.trim()) {
-        return { handled: true, reply: "cron 表达式不能为空" };
-      }
       const prompt = tk.readRest();
-      if (!prompt) {
-        return { handled: true, reply: "prompt 不能为空" };
-      }
+      // Expression/prompt emptiness and cron-expression validity are validated
+      // in CronManager.add (single source of truth); surface its errors here.
       const result = deps.addCron(userId, expression, prompt);
+      if (!result.ok) {
+        return { handled: true, reply: result.error };
+      }
       return { handled: true, reply: replyForCronAdd(result) };
     }
     default: {
-      return { handled: true, reply: `未知的 //cron 子命令: ${sub}\n\n${CRON_USAGE}` };
+      return { handled: true, reply: `未知的 //cron 子命令: ${subRaw}\n\n${CRON_USAGE}` };
     }
   }
 }

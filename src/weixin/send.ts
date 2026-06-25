@@ -41,9 +41,12 @@ export async function sendTextMessage(
 }
 
 /**
- * Split text into segments of max length, respecting line breaks where possible.
+ * Split text into segments of at most `maxLen` characters, breaking at a
+ * newline where possible. Guarded against `maxLen < 1` (which would otherwise
+ * loop forever: breakAt resolves to 0 and the remainder never shrinks).
  */
 export function splitText(text: string, maxLen: number): string[] {
+  if (maxLen < 1) return [text];
   if (text.length <= maxLen) return [text];
 
   const segments: string[] = [];
